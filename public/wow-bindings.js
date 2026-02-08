@@ -615,6 +615,20 @@
       overlay.style.display = "none";
       throw new Error("Camera requires HTTPS (secure context). Open the HTTPS URL.");
     }
+    // Host can disable camera via Permissions-Policy header
+    try {
+      const pp = document.permissionsPolicy || document.featurePolicy;
+      if (pp && typeof pp.allowsFeature === "function" && !pp.allowsFeature("camera")) {
+        try { overlay.classList.remove('scanning'); } catch {}
+        overlay.style.display = "none";
+        const err = new Error("Camera blocked by host Permissions-Policy (camera disabled).");
+        err.name = "PermissionsPolicyError";
+        throw err;
+      }
+    } catch (e) {
+      // ignore detection errors
+    }
+
     if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
       try { overlay.classList.remove('scanning'); } catch {}
       overlay.style.display = "none";
@@ -720,6 +734,87 @@
     if (variant === "danger") st.classList.add("danger");
   }
 
+
+  function formatCameraError(e) {
+    const name = (e && e.name) ? String(e.name) : "";
+    const msg = (e && e.message) ? String(e.message) : "";
+    const base = name ? `${name}${msg ? `: ${msg}` : ""}` : (msg || "Camera error");
+    if (/NotAllowedError|PermissionDeniedError/i.test(name)) {
+      return "Camera permission is blocked/denied. Click the lock/key icon in the address bar → Site settings → Camera → Allow, then refresh.";
+    }
+    if (/NotFoundError|DevicesNotFoundError/i.test(name)) {
+      return "No camera device found on this machine (NotFoundError). Connect a camera or try another device.";
+    }
+    if (/NotReadableError|TrackStartError/i.test(name)) {
+      return "Camera is in use by another app (NotReadableError). Close other apps using the camera and try again.";
+    }
+    if (/SecurityError/i.test(name)) {
+      return "Camera requires HTTPS (secure context). Open the HTTPS URL.";
+    }
+    if (!window.isSecureContext) {
+      return "Camera requires HTTPS (secure context). Open the HTTPS URL.";
+    }
+    return base;
+  }
+
+  async function manualScanEntry(reason) {
+    const overlay = el("scanOverlay");
+    const err = el("scanError");
+    const manual = el("scanManual");
+    const input = el("scanManualInput");
+    const submit = el("scanManualSubmit");
+    const closeBtn = el("scanCloseBtn");
+
+    // Last-resort fallback
+    if (!overlay || !err || !manual || !input || !submit) {
+      return prompt((reason ? (reason + "\n\n") : "") + "Paste barcode payload:", "") || "";
+    }
+
+    overlay.style.display = "flex";
+    try { overlay.classList.remove('scanning'); } catch {}
+
+    err.style.display = "block";
+    err.textContent = reason || "Camera unavailable. Paste barcode payload below.";
+
+    manual.style.display = "block";
+    input.value = "";
+
+    // focus after paint
+    setTimeout(() => { try { input.focus(); } catch {} }, 40);
+
+    return await new Promise((resolve) => {
+      let done = false;
+
+      const cleanup = () => {
+        try { submit.removeEventListener("click", onSubmit); } catch {}
+        try { input.removeEventListener("keydown", onKey); } catch {}
+        try { if (closeBtn) closeBtn.removeEventListener("click", onCancel); } catch {}
+        try { document.removeEventListener("keydown", onEsc); } catch {}
+      };
+
+      const finish = (val) => {
+        if (done) return;
+        done = true;
+        cleanup();
+        try { overlay.style.display = "none"; } catch {}
+        try { err.style.display = "none"; err.textContent = ""; } catch {}
+        try { manual.style.display = "none"; } catch {}
+        resolve(String(val || "").trim());
+      };
+
+      const onSubmit = () => finish(input.value);
+      const onKey = (ev) => { if (ev.key === "Enter") { ev.preventDefault(); finish(input.value); } };
+      const onCancel = () => finish("");
+      const onEsc = (ev) => { if (ev.key === "Escape") finish(""); };
+
+      submit.addEventListener("click", onSubmit);
+      input.addEventListener("keydown", onKey);
+      if (closeBtn) closeBtn.addEventListener("click", onCancel);
+      document.addEventListener("keydown", onEsc);
+    });
+  }
+
+
   async function submitScan(raw) {
     const scan_id = `WOW-${Date.now()}-${String(Math.floor(Math.random() * 1e6)).padStart(6, "0")}`;
     const idem = uuid();
@@ -768,8 +863,11 @@
       try {
         raw = await decodeOnce();
       } catch (e) {
-        // fallback prompt
-        raw = prompt("Camera not available. Paste barcode payload:", "") || "";
+        // camera/scanner failed → show reason + manual entry UI
+        try { console.error("[SCAN] decodeOnce failed:", e); } catch {}
+        const reason = formatCameraError(e);
+        setScannerStatus("Camera blocked", "danger");
+        raw = await manualScanEntry(reason);
       }
       raw = String(raw || "").trim();
       if (!raw) throw new Error("Empty scan");

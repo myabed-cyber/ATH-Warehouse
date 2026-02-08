@@ -405,6 +405,65 @@
             color: var(--text-muted);
             border-top: 1px solid var(--glass-border);
         }
+        #scanOverlay .scan-error{
+            display:none;
+            margin: 12px 16px 0;
+            padding: 10px 12px;
+            border-radius: 14px;
+            border: 1px solid rgba(239,68,68,0.28);
+            background: rgba(239,68,68,0.08);
+            color: rgba(248,250,252,0.92);
+            font-size: 12px;
+            line-height: 1.4;
+        }
+        #scanOverlay .scan-manual{
+            display:none;
+            margin: 10px 16px 0;
+            padding: 12px;
+            border-radius: 16px;
+            border: 1px solid var(--glass-border);
+            background: rgba(255,255,255,0.04);
+        }
+        #scanOverlay .scan-manual-label{
+            font-size: 11px;
+            font-weight: 800;
+            letter-spacing: .6px;
+            color: var(--text-muted);
+            margin-bottom: 8px;
+            text-transform: uppercase;
+        }
+        #scanOverlay .scan-manual-row{
+            display:flex;
+            gap:10px;
+            align-items:center;
+        }
+        #scanOverlay .scan-manual-row input{
+            flex:1;
+            min-width:0;
+            padding: 12px 12px;
+            border-radius: 14px;
+            border: 1px solid var(--glass-border);
+            background: rgba(0,0,0,0.25);
+            color: var(--text-main);
+            font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+            font-size: 12px;
+        }
+        #scanOverlay .scan-manual-row input:focus{
+            border-color: var(--brand-primary);
+            box-shadow: 0 0 0 4px var(--brand-glow);
+        }
+        #scanOverlay .scan-manual-row button{
+            padding: 12px 14px;
+            border-radius: 14px;
+            border: none;
+            cursor:pointer;
+            color:white;
+            font-weight: 800;
+            background: linear-gradient(135deg, var(--brand-primary), var(--brand-secondary));
+            box-shadow: 0 10px 25px var(--brand-glow);
+            white-space:nowrap;
+        }
+
         #scanOverlay .scan-frame {
             pointer-events: none;
             position: absolute;
@@ -461,7 +520,7 @@
             <div class="login-wrapper">
                 <div class="login-card glass-panel">
                     <div style="text-align: center;">
-                        <img class="brand-logo-lg" src="./assets/ath-medical-division.png" alt="ATH Medical Division Logo">
+                        <img class="brand-logo-lg" src="/assets/ath-medical-division.png" alt="ATH Medical Division Logo">
 <h1 style="margin: 0; font-size: 26px; font-weight: 800;">ATH Portal <span style="color: var(--brand-primary)">Ultra</span></h1>
                         <p style="color: var(--text-muted); margin: 8px 0 32px;">Advanced Warehouse Management</p>
                     </div>
@@ -486,7 +545,7 @@
                 <!-- Sidebar -->
                 <aside class="sidebar glass-panel">
                     <div style="display: flex; align-items: center; gap: 12px; padding: 0 12px 20px;">
-                        <img class="brand-logo-sm" src="./assets/ath-medical-division.png" alt="ATH Medical">
+                        <img class="brand-logo-sm" src="/assets/ath-medical-division.png" alt="ATH Medical">
                         <div>
                             <div style="font-weight: 800; font-size: 16px;">ATH Medical</div>
                             <div style="font-size: 11px; color: var(--text-muted); font-weight: 700; letter-spacing: 1px;">RIYADH HUB</div>
@@ -560,7 +619,7 @@
                             <button class="action-btn" onclick="toggleTheme()" onmouseenter="sfx.hover()" title="Theme">
                                 <i class="ph-bold ph-moon-stars"></i>
                             </button>
-                            <img class="topbar-ath-logo" src="./assets/ath-medical-division.png" alt="ATH" style="height:34px; width:auto; opacity:0.92;">
+                            <img class="topbar-ath-logo" src="/assets/ath-medical-division.png" alt="ATH" style="height:34px; width:auto; opacity:0.92;">
                         </div>
                     </header>
 
@@ -650,12 +709,24 @@
                 <div class="scan-title">Camera Scan</div>
                 <button class="scan-close" type="button" id="scanCloseBtn" aria-label="Close">✕</button>
             </div>
+
             <div style="position: relative;">
                 <video id="cameraFeed" playsinline muted></video>
                 <div class="scan-frame"></div>
                 <div class="scan-laser"></div>
             </div>
-            <div class="scan-hint">Point the camera at the barcode. If the camera is blocked, open the HTTPS URL and allow permissions.</div>
+
+            <div id="scanError" class="scan-error"></div>
+
+            <div id="scanManual" class="scan-manual">
+                <div class="scan-manual-label">Manual input</div>
+                <div class="scan-manual-row">
+                    <input id="scanManualInput" type="text" autocomplete="off" placeholder="Paste barcode payload…">
+                    <button id="scanManualSubmit" type="button">Submit</button>
+                </div>
+            </div>
+
+            <div class="scan-hint">If you don’t see a camera permission popup: click the lock/key icon → Site settings → Camera → Allow. (HTTPS required)</div>
         </div>
     </div>
 
@@ -724,6 +795,8 @@
             btn.addEventListener('click', () => {
                 ov.style.display = 'none';
                 ov.classList.remove('scanning');
+                try { const se=document.getElementById('scanError'); if(se){se.style.display='none'; se.textContent='';} } catch {}
+                try { const sm=document.getElementById('scanManual'); if(sm){sm.style.display='none';} } catch {}
                 const v = document.getElementById('cameraFeed');
                 try { if (v && v.srcObject) { v.srcObject.getTracks().forEach(t => t.stop()); v.srcObject = null; } } catch {}
             });
