@@ -317,6 +317,46 @@
 
         /* Notification */
         .toast-container { position: fixed; top: 24px; left: 50%; transform: translateX(-50%); z-index: 1000; }
+        /* Scan modal overlay & content */
+        .scan-modal {
+            position: fixed;
+            inset: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: rgba(0, 0, 0, 0.6);
+            z-index: 999;
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity 0.3s ease;
+        }
+        .scan-modal.show {
+            opacity: 1;
+            pointer-events: auto;
+        }
+        .scan-modal-content {
+            width: 90%;
+            max-width: 480px;
+            padding: 24px;
+            border-radius: var(--radius-xl);
+            background: var(--glass-surface);
+            backdrop-filter: blur(24px);
+            -webkit-backdrop-filter: blur(24px);
+            border: 1px solid var(--glass-border);
+            box-shadow: var(--glass-shadow);
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+        .scan-modal-content video {
+            width: 100%;
+            max-height: 260px;
+            border-radius: var(--radius-lg);
+            background: #000;
+        }
+        .scan-modal-content input[type="text"] {
+            flex: 1;
+        }
         .toast {
             background: var(--glass-surface); backdrop-filter: blur(20px);
             border: 1px solid var(--glass-border); padding: 12px 20px; border-radius: 99px;
@@ -331,116 +371,6 @@
             .topbar { padding: 10px; }
             .search-pill { width: 100%; }
         }
-    
-        /* === BRAND LOGOS (ATH) === */
-        .brand-logo-lg {
-            width: 220px;
-            max-width: 75%;
-            height: auto;
-            display: block;
-            margin: 0 auto 18px;
-            filter: drop-shadow(0 18px 35px rgba(0,0,0,0.45));
-        }
-        .brand-logo-sm {
-            width: 52px;
-            height: 52px;
-            object-fit: contain;
-            display: block;
-            filter: drop-shadow(0 10px 20px rgba(0,0,0,0.35));
-        }
-
-        .topbar-ath-logo { display: block; }
-        @media (max-width: 520px) { .topbar-ath-logo { display:none; } }
-
-        /* === CAMERA SCAN OVERLAY === */
-        #scanOverlay {
-            position: fixed;
-            inset: 0;
-            z-index: 9999;
-            display: none; /* toggled by wow-bindings.js */
-            align-items: center;
-            justify-content: center;
-            padding: 18px;
-            background: rgba(0,0,0,0.72);
-            backdrop-filter: blur(10px);
-            -webkit-backdrop-filter: blur(10px);
-        }
-        #scanOverlay .scan-modal {
-            width: min(92vw, 560px);
-            border-radius: var(--radius-xl);
-            overflow: hidden;
-            position: relative;
-        }
-        #scanOverlay .scan-head {
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            padding: 14px 16px;
-            border-bottom: 1px solid var(--glass-border);
-        }
-        #scanOverlay .scan-title {
-            font-weight: 900;
-            letter-spacing: .5px;
-        }
-        #scanOverlay .scan-close {
-            border: none;
-            background: transparent;
-            color: var(--text-main);
-            opacity: .75;
-            cursor: pointer;
-            font-size: 18px;
-        }
-        #scanOverlay .scan-close:hover { opacity: 1; }
-        #cameraFeed {
-            width: 100%;
-            height: 54vh;
-            max-height: 520px;
-            background: rgba(0,0,0,0.35);
-            display: block;
-            object-fit: cover;
-        }
-        #scanOverlay .scan-hint {
-            padding: 12px 16px;
-            font-size: 12px;
-            color: var(--text-muted);
-            border-top: 1px solid var(--glass-border);
-        }
-        #scanOverlay .scan-frame {
-            pointer-events: none;
-            position: absolute;
-            inset: 60px 16px 56px 16px;
-            border-radius: 18px;
-            border: 1px solid rgba(255,255,255,0.12);
-        }
-        #scanOverlay .scan-frame::before, #scanOverlay .scan-frame::after {
-            content: '';
-            position: absolute;
-            width: 28px;
-            height: 28px;
-            border: 3px solid var(--brand-primary);
-            border-radius: 6px;
-            opacity: 0.9;
-        }
-        #scanOverlay .scan-frame::before {
-            top: 10px; left: 10px; border-right: none; border-bottom: none;
-        }
-        #scanOverlay .scan-frame::after {
-            bottom: 10px; right: 10px; border-left: none; border-top: none;
-        }
-        #scanOverlay .scan-laser {
-            position: absolute;
-            left: 26px; right: 26px;
-            top: 110px;
-            height: 2px;
-            background: linear-gradient(90deg, transparent, var(--tactical-red), transparent);
-            opacity: 0;
-            transform: translateY(0);
-            transition: opacity .25s ease;
-            animation: laserMove 1.8s infinite ease-in-out;
-        }
-        #scanOverlay.scanning .scan-laser { opacity: 0.9; }
-        @keyframes laserMove { 0%,100% { transform: translateY(0); } 50% { transform: translateY(220px); } }
-
     </style>
 </head>
 <body>
@@ -461,8 +391,11 @@
             <div class="login-wrapper">
                 <div class="login-card glass-panel">
                     <div style="text-align: center;">
-                        <img class="brand-logo-lg" src="./assets/ath-medical-division.png" alt="ATH Medical Division Logo">
-<h1 style="margin: 0; font-size: 26px; font-weight: 800;">ATH Portal <span style="color: var(--brand-primary)">Ultra</span></h1>
+                        <!-- Replace generic cube icon with the actual ATH logo image -->
+                        <div style="display:flex; justify-content:center; margin-bottom:20px;">
+                            <img src="./assets/ath-medical-division.png" alt="ATH Medical Division" style="width:80px; height:80px; border-radius:20px; object-fit:contain; box-shadow:0 20px 50px var(--brand-glow);"/>
+                        </div>
+                        <h1 style="margin: 0; font-size: 26px; font-weight: 800;">ATH Portal <span style="color: var(--brand-primary)">Ultra</span></h1>
                         <p style="color: var(--text-muted); margin: 8px 0 32px;">Advanced Warehouse Management</p>
                     </div>
 
@@ -486,7 +419,10 @@
                 <!-- Sidebar -->
                 <aside class="sidebar glass-panel">
                     <div style="display: flex; align-items: center; gap: 12px; padding: 0 12px 20px;">
-                        <img class="brand-logo-sm" src="./assets/ath-medical-division.png" alt="ATH Medical">
+                        <!-- Swap sidebar cube icon with the ATH logo image -->
+                        <div style="width:36px; height:36px; border-radius:10px; overflow:hidden;">
+                            <img src="./assets/ath-medical-division.png" alt="ATH" style="width:100%; height:100%; object-fit:contain;"/>
+                        </div>
                         <div>
                             <div style="font-weight: 800; font-size: 16px;">ATH Medical</div>
                             <div style="font-size: 11px; color: var(--text-muted); font-weight: 700; letter-spacing: 1px;">RIYADH HUB</div>
@@ -560,7 +496,6 @@
                             <button class="action-btn" onclick="toggleTheme()" onmouseenter="sfx.hover()" title="Theme">
                                 <i class="ph-bold ph-moon-stars"></i>
                             </button>
-                            <img class="topbar-ath-logo" src="./assets/ath-medical-division.png" alt="ATH" style="height:34px; width:auto; opacity:0.92;">
                         </div>
                     </header>
 
@@ -642,25 +577,27 @@
 
     </div>
 
-
-    <!-- Camera Scan Overlay (used by wow-bindings.js) -->
-    <div id="scanOverlay">
-        <div class="scan-modal glass-panel">
-            <div class="scan-head">
-                <div class="scan-title">Camera Scan</div>
-                <button class="scan-close" type="button" id="scanCloseBtn" aria-label="Close">✕</button>
-            </div>
-            <div style="position: relative;">
-                <video id="cameraFeed" playsinline muted></video>
-                <div class="scan-frame"></div>
-                <div class="scan-laser"></div>
-            </div>
-            <div class="scan-hint">Point the camera at the barcode. If the camera is blocked, open the HTTPS URL and allow permissions.</div>
-        </div>
-    </div>
-
     <!-- Notification Container -->
     <div class="toast-container" id="toastArea"></div>
+
+    <!-- Scan modal: provides camera feed and manual input for scanning -->
+    <div id="scanModal" class="scan-modal">
+        <div class="scan-modal-content glass-panel">
+            <div style="display: flex; align-items: center; justify-content: space-between;">
+                <div style="font-weight: 700; font-size: 16px;">Scan UDI</div>
+                <button id="btnCloseScan" type="button" style="background: transparent; border: none; color: var(--text-main); font-size: 22px; cursor: pointer;"><i class="ph-bold ph-x"></i></button>
+            </div>
+            <video id="scanVideo" autoplay playsinline></video>
+            <div id="scanHint" style="font-size: 12px; color: var(--text-muted); font-weight: 600;">Camera capture</div>
+            <div style="display: flex; gap: 8px; margin-top: 12px;">
+                <input type="text" id="scanManual" class="form-input" placeholder="Enter UDI manually..." style="flex: 1;">
+                <button id="btnManualSubmit" type="button" class="btn-primary" style="padding: 12px 16px; display: flex; align-items: center; gap: 8px;">
+                    <span>Submit</span>
+                    <i class="ph-bold ph-arrow-right"></i>
+                </button>
+            </div>
+        </div>
+    </div>
 
     <script>
         /* === PRO AUDIO ENGINE (Formal Tones) === */
@@ -707,29 +644,11 @@
             click: () => sfx.play('click')
         };
 
-        // Expose audio engine to bindings
-        window.sfx = sfx;
-
-
         /* === APP LOGIC === */
         const state = { theme: 'dark', lang: 'en', scanning: false };
         const el = id => document.getElementById(id);
 
         document.addEventListener('DOMContentLoaded', () => { renderChart(); });
-        
-        function bindScanOverlayClose() {
-            const ov = document.getElementById('scanOverlay');
-            const btn = document.getElementById('scanCloseBtn');
-            if(!ov || !btn) return;
-            btn.addEventListener('click', () => {
-                ov.style.display = 'none';
-                ov.classList.remove('scanning');
-                const v = document.getElementById('cameraFeed');
-                try { if (v && v.srcObject) { v.srcObject.getTracks().forEach(t => t.stop()); v.srcObject = null; } } catch {}
-            });
-        }
-
-        bindScanOverlayClose();
         document.addEventListener('click', () => sfx.init(), {once:true});
 
         el('loginForm').addEventListener('submit', (e) => {
@@ -765,33 +684,77 @@
             document.documentElement.setAttribute('data-theme', state.theme);
         }
 
+        // --- Camera helpers (request permission and stream feed) ---
+        let camStream = null;
+        async function startCamera() {
+            const videoEl = document.getElementById('scanVideo');
+            const hintEl = document.getElementById('scanHint');
+            if (!videoEl) return;
+            if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+                if (hintEl) hintEl.innerText = 'Camera API not supported.';
+                return;
+            }
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' } }, audio: false });
+                camStream = stream;
+                videoEl.srcObject = stream;
+                await videoEl.play();
+                if (hintEl) hintEl.innerText = 'Camera ready';
+            } catch (err) {
+                if (hintEl) hintEl.innerText = 'Camera blocked. Use manual input.';
+                // Inform user via toast and sound
+                showToast('Camera error', err.message || 'CAMERA_BLOCKED', 'warn');
+            }
+        }
+
+        function stopCamera() {
+            if (camStream) {
+                try { camStream.getTracks().forEach((t) => t.stop()); } catch {}
+                camStream = null;
+            }
+            const v = document.getElementById('scanVideo');
+            if (v) {
+                try { v.pause(); } catch {}
+                v.srcObject = null;
+            }
+        }
+
         function triggerScan() {
             const scanner = el('globalScanner');
             const status = el('scannerStatus');
             const btn = document.querySelector('.scan-trigger-btn');
-            
+
+            // Toggle scanning state
             state.scanning = !state.scanning;
 
             if (state.scanning) {
+                // Start scan UI
                 sfx.play('scan_start');
-                scanner.classList.add('active');
-                status.innerText = "ACTIVE CAPTURE";
-                status.style.color = "var(--tactical-red)";
-                btn.innerHTML = `<i class="ph-bold ph-spinner" style="animation: spin 1s infinite linear"></i> STOP`;
-                
-                setTimeout(() => {
-                    if (state.scanning) {
-                        triggerScan();
-                        sfx.play('success');
-                        showToast('Scan Verified', 'UDI: (01)08800129921', 'success');
-                    }
-                }, 2500);
+                scanner?.classList.add('active');
+                if (status) {
+                    status.innerText = 'ACTIVE CAPTURE';
+                    status.style.color = 'var(--tactical-red)';
+                }
+                if (btn) btn.innerHTML = `<i class="ph-bold ph-spinner" style="animation: spin 1s infinite linear"></i> STOP`;
+
+                // Show scan modal and start camera
+                const modal = document.getElementById('scanModal');
+                if (modal) modal.classList.add('show');
+                startCamera();
             } else {
+                // Stop scan UI
                 sfx.click();
-                scanner.classList.remove('active');
-                status.innerText = "STANDBY";
-                status.style.color = "var(--brand-primary)";
-                btn.innerHTML = `<i class="ph-bold ph-aperture"></i> SCAN`;
+                scanner?.classList.remove('active');
+                if (status) {
+                    status.innerText = 'STANDBY';
+                    status.style.color = 'var(--brand-primary)';
+                }
+                if (btn) btn.innerHTML = `<i class="ph-bold ph-aperture"></i> SCAN`;
+
+                // Hide modal and stop camera
+                const modal = document.getElementById('scanModal');
+                if (modal) modal.classList.remove('show');
+                stopCamera();
             }
         }
 
@@ -819,8 +782,83 @@
             el('toastArea').appendChild(toast);
             setTimeout(() => { toast.style.opacity = '0'; setTimeout(() => toast.remove(), 300); }, 4000);
         }
+
+        // Attach handlers for scan modal controls after DOM is loaded
+        document.addEventListener('DOMContentLoaded', () => {
+            const closeBtn = document.getElementById('btnCloseScan');
+            if (closeBtn) closeBtn.addEventListener('click', () => {
+                // If a scan is running, toggle it (will hide modal and stop camera)
+                if (state.scanning) triggerScan();
+                else {
+                    document.getElementById('scanModal')?.classList.remove('show');
+                    stopCamera();
+                }
+            });
+            const manualBtn = document.getElementById('btnManualSubmit');
+            if (manualBtn) manualBtn.addEventListener('click', () => {
+                const raw = (document.getElementById('scanManual')?.value || '').trim();
+                if (!raw) return;
+                try { sfx.play('success'); } catch {}
+                showToast('Manual Scan', raw, 'success');
+                // Clear input
+                document.getElementById('scanManual').value = '';
+                // Stop scanning if running
+                if (state.scanning) triggerScan();
+            });
+        });
     </script>
 
     <script src="/wow-bindings.js"></script>
+
+    <!-- Override the default scan handler from wow-bindings to integrate the custom camera modal.
+         The built-in bindings assign window.triggerScan to doScanFlow() which prompts fallback input if camera
+         is unavailable. To ensure our camera overlay and permission request are used instead, we reassign
+         window.triggerScan here after wow-bindings.js has loaded. -->
+    <script>
+        // Use the helpers defined earlier (startCamera/stopCamera) to implement the scan flow.
+        // Toggling state.scanning controls the sidebar indicator; this mirrors the WOW behaviour
+        // but integrates the camera modal defined in this page.
+        (function() {
+            // Guard against missing global objects
+            const stateRef = window.state || { scanning: false };
+            const sfxRef = window.sfx || { play: () => {} };
+
+            window.triggerScan = function() {
+                // Toggle scanning state
+                stateRef.scanning = !stateRef.scanning;
+
+                const scanner = document.getElementById('globalScanner');
+                const status = document.getElementById('scannerStatus');
+                const btn = document.querySelector('.scan-trigger-btn');
+                const modal = document.getElementById('scanModal');
+
+                if (stateRef.scanning) {
+                    // Activate UI
+                    try { sfxRef.play('scan_start'); } catch {}
+                    if (scanner) scanner.classList.add('active');
+                    if (status) {
+                        status.innerText = 'ACTIVE CAPTURE';
+                        status.style.color = 'var(--tactical-red)';
+                    }
+                    if (btn) btn.innerHTML = `<i class="ph-bold ph-spinner" style="animation: spin 1s infinite linear"></i> STOP`;
+                    // Show modal and start the camera
+                    if (modal) modal.classList.add('show');
+                    if (typeof startCamera === 'function') startCamera();
+                } else {
+                    // Deactivate UI
+                    try { sfxRef.play('click'); } catch {}
+                    if (scanner) scanner.classList.remove('active');
+                    if (status) {
+                        status.innerText = 'STANDBY';
+                        status.style.color = 'var(--brand-primary)';
+                    }
+                    if (btn) btn.innerHTML = `<i class="ph-bold ph-aperture"></i> SCAN`;
+                    // Hide modal and stop camera
+                    if (modal) modal.classList.remove('show');
+                    if (typeof stopCamera === 'function') stopCamera();
+                }
+            };
+        })();
+    </script>
 </body>
 </html>
