@@ -12,7 +12,8 @@
     "express": "4.19.2",
     "jsonwebtoken": "9.0.2",
     "pg": "8.12.0",
-    "@zxing/browser": "0.1.5"
+    "@zxing/browser": "0.1.5",
+    "@zxing/library": "0.20.0"
   },
   "engines": {
     "node": ">=20"

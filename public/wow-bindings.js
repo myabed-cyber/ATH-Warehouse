@@ -607,6 +607,19 @@
     if (!vid || !overlay) throw new Error("Scanner UI not found");
 
     overlay.style.display = "flex";
+    try { overlay.classList.add('scanning'); } catch {}
+
+    // Camera APIs require a secure context (HTTPS or localhost)
+    if (!window.isSecureContext) {
+      try { overlay.classList.remove('scanning'); } catch {}
+      overlay.style.display = "none";
+      throw new Error("Camera requires HTTPS (secure context). Open the HTTPS URL.");
+    }
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      try { overlay.classList.remove('scanning'); } catch {}
+      overlay.style.display = "none";
+      throw new Error("Camera not available in this browser/device.");
+    }
 
     // 1) Native BarcodeDetector (no external deps)
     if ("BarcodeDetector" in window) {
@@ -651,6 +664,7 @@
           vid.pause();
           vid.srcObject = null;
         } catch {}
+        try { overlay.classList.remove('scanning'); } catch {}
         overlay.style.display = "none";
       }
     }
@@ -658,6 +672,7 @@
     // 2) ZXing fallback (loads from local candidate or CDN)
     const ok = await initZXing();
     if (!ok) {
+      try { overlay.classList.remove('scanning'); } catch {}
       overlay.style.display = "none";
       throw new Error("No scanner available (BarcodeDetector/ZXing)");
     }
@@ -678,6 +693,7 @@
         try {
           await codeReader.reset();
         } catch {}
+        try { overlay.classList.remove('scanning'); } catch {}
         overlay.style.display = "none";
       };
 

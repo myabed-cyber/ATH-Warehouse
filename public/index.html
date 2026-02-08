@@ -331,6 +331,116 @@
             .topbar { padding: 10px; }
             .search-pill { width: 100%; }
         }
+    
+        /* === BRAND LOGOS (ATH) === */
+        .brand-logo-lg {
+            width: 220px;
+            max-width: 75%;
+            height: auto;
+            display: block;
+            margin: 0 auto 18px;
+            filter: drop-shadow(0 18px 35px rgba(0,0,0,0.45));
+        }
+        .brand-logo-sm {
+            width: 52px;
+            height: 52px;
+            object-fit: contain;
+            display: block;
+            filter: drop-shadow(0 10px 20px rgba(0,0,0,0.35));
+        }
+
+        .topbar-ath-logo { display: block; }
+        @media (max-width: 520px) { .topbar-ath-logo { display:none; } }
+
+        /* === CAMERA SCAN OVERLAY === */
+        #scanOverlay {
+            position: fixed;
+            inset: 0;
+            z-index: 9999;
+            display: none; /* toggled by wow-bindings.js */
+            align-items: center;
+            justify-content: center;
+            padding: 18px;
+            background: rgba(0,0,0,0.72);
+            backdrop-filter: blur(10px);
+            -webkit-backdrop-filter: blur(10px);
+        }
+        #scanOverlay .scan-modal {
+            width: min(92vw, 560px);
+            border-radius: var(--radius-xl);
+            overflow: hidden;
+            position: relative;
+        }
+        #scanOverlay .scan-head {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 14px 16px;
+            border-bottom: 1px solid var(--glass-border);
+        }
+        #scanOverlay .scan-title {
+            font-weight: 900;
+            letter-spacing: .5px;
+        }
+        #scanOverlay .scan-close {
+            border: none;
+            background: transparent;
+            color: var(--text-main);
+            opacity: .75;
+            cursor: pointer;
+            font-size: 18px;
+        }
+        #scanOverlay .scan-close:hover { opacity: 1; }
+        #cameraFeed {
+            width: 100%;
+            height: 54vh;
+            max-height: 520px;
+            background: rgba(0,0,0,0.35);
+            display: block;
+            object-fit: cover;
+        }
+        #scanOverlay .scan-hint {
+            padding: 12px 16px;
+            font-size: 12px;
+            color: var(--text-muted);
+            border-top: 1px solid var(--glass-border);
+        }
+        #scanOverlay .scan-frame {
+            pointer-events: none;
+            position: absolute;
+            inset: 60px 16px 56px 16px;
+            border-radius: 18px;
+            border: 1px solid rgba(255,255,255,0.12);
+        }
+        #scanOverlay .scan-frame::before, #scanOverlay .scan-frame::after {
+            content: '';
+            position: absolute;
+            width: 28px;
+            height: 28px;
+            border: 3px solid var(--brand-primary);
+            border-radius: 6px;
+            opacity: 0.9;
+        }
+        #scanOverlay .scan-frame::before {
+            top: 10px; left: 10px; border-right: none; border-bottom: none;
+        }
+        #scanOverlay .scan-frame::after {
+            bottom: 10px; right: 10px; border-left: none; border-top: none;
+        }
+        #scanOverlay .scan-laser {
+            position: absolute;
+            left: 26px; right: 26px;
+            top: 110px;
+            height: 2px;
+            background: linear-gradient(90deg, transparent, var(--tactical-red), transparent);
+            opacity: 0;
+            transform: translateY(0);
+            transition: opacity .25s ease;
+            animation: laserMove 1.8s infinite ease-in-out;
+        }
+        #scanOverlay.scanning .scan-laser { opacity: 0.9; }
+        @keyframes laserMove { 0%,100% { transform: translateY(0); } 50% { transform: translateY(220px); } }
+
     </style>
 </head>
 <body>
@@ -351,10 +461,8 @@
             <div class="login-wrapper">
                 <div class="login-card glass-panel">
                     <div style="text-align: center;">
-                        <div class="brand-icon-lg">
-                            <i class="ph-bold ph-cube-transparent"></i>
-                        </div>
-                        <h1 style="margin: 0; font-size: 26px; font-weight: 800;">ATH Portal <span style="color: var(--brand-primary)">Ultra</span></h1>
+                        <img class="brand-logo-lg" src="./assets/ath-medical-division.png" alt="ATH Medical Division Logo">
+<h1 style="margin: 0; font-size: 26px; font-weight: 800;">ATH Portal <span style="color: var(--brand-primary)">Ultra</span></h1>
                         <p style="color: var(--text-muted); margin: 8px 0 32px;">Advanced Warehouse Management</p>
                     </div>
 
@@ -378,7 +486,7 @@
                 <!-- Sidebar -->
                 <aside class="sidebar glass-panel">
                     <div style="display: flex; align-items: center; gap: 12px; padding: 0 12px 20px;">
-                        <div style="width: 36px; height: 36px; background: var(--brand-primary); border-radius: 10px; display: grid; place-items: center; color: white;"><i class="ph-bold ph-cube"></i></div>
+                        <img class="brand-logo-sm" src="./assets/ath-medical-division.png" alt="ATH Medical">
                         <div>
                             <div style="font-weight: 800; font-size: 16px;">ATH Medical</div>
                             <div style="font-size: 11px; color: var(--text-muted); font-weight: 700; letter-spacing: 1px;">RIYADH HUB</div>
@@ -452,6 +560,7 @@
                             <button class="action-btn" onclick="toggleTheme()" onmouseenter="sfx.hover()" title="Theme">
                                 <i class="ph-bold ph-moon-stars"></i>
                             </button>
+                            <img class="topbar-ath-logo" src="./assets/ath-medical-division.png" alt="ATH" style="height:34px; width:auto; opacity:0.92;">
                         </div>
                     </header>
 
@@ -533,6 +642,23 @@
 
     </div>
 
+
+    <!-- Camera Scan Overlay (used by wow-bindings.js) -->
+    <div id="scanOverlay">
+        <div class="scan-modal glass-panel">
+            <div class="scan-head">
+                <div class="scan-title">Camera Scan</div>
+                <button class="scan-close" type="button" id="scanCloseBtn" aria-label="Close">✕</button>
+            </div>
+            <div style="position: relative;">
+                <video id="cameraFeed" playsinline muted></video>
+                <div class="scan-frame"></div>
+                <div class="scan-laser"></div>
+            </div>
+            <div class="scan-hint">Point the camera at the barcode. If the camera is blocked, open the HTTPS URL and allow permissions.</div>
+        </div>
+    </div>
+
     <!-- Notification Container -->
     <div class="toast-container" id="toastArea"></div>
 
@@ -581,11 +707,29 @@
             click: () => sfx.play('click')
         };
 
+        // Expose audio engine to bindings
+        window.sfx = sfx;
+
+
         /* === APP LOGIC === */
         const state = { theme: 'dark', lang: 'en', scanning: false };
         const el = id => document.getElementById(id);
 
         document.addEventListener('DOMContentLoaded', () => { renderChart(); });
+        
+        function bindScanOverlayClose() {
+            const ov = document.getElementById('scanOverlay');
+            const btn = document.getElementById('scanCloseBtn');
+            if(!ov || !btn) return;
+            btn.addEventListener('click', () => {
+                ov.style.display = 'none';
+                ov.classList.remove('scanning');
+                const v = document.getElementById('cameraFeed');
+                try { if (v && v.srcObject) { v.srcObject.getTracks().forEach(t => t.stop()); v.srcObject = null; } } catch {}
+            });
+        }
+
+        bindScanOverlayClose();
         document.addEventListener('click', () => sfx.init(), {once:true});
 
         el('loginForm').addEventListener('submit', (e) => {

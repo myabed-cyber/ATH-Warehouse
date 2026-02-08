@@ -83,6 +83,31 @@ function hashPayload(obj) {
   return sha256Hex(stableStringify(obj));
 }
 
+function ensureZxingVendor() {
+  // Provide a local ZXing UMD bundle for browser scanning (avoids CDN blocks).
+  try {
+    const publicDir = path.join(__dirname, "public");
+    if (!fs.existsSync(publicDir)) return;
+
+    const vendorDir = path.join(publicDir, "vendor");
+    if (!fs.existsSync(vendorDir)) fs.mkdirSync(vendorDir, { recursive: true });
+
+    const src = path.join(__dirname, "node_modules", "@zxing", "library", "umd", "index.min.js");
+    const dst1 = path.join(vendorDir, "zxing-umd.min.js");
+    const dst2 = path.join(publicDir, "zxing-umd.min.js"); // fallback path
+
+    if (fs.existsSync(src)) {
+      if (!fs.existsSync(dst1)) fs.copyFileSync(src, dst1);
+      if (!fs.existsSync(dst2)) fs.copyFileSync(src, dst2);
+      console.log("[VENDOR] ZXing UMD ready (public/vendor/zxing-umd.min.js)." );
+    } else {
+      console.warn("[VENDOR] @zxing/library UMD not found. Run npm install (dependency: @zxing/library)." );
+    }
+  } catch (e) {
+    console.warn("[VENDOR] Failed to prepare ZXing vendor bundle:", e?.message || e);
+  }
+}
+
 // ---------------- Postgres (Supabase) ----------------
 let _pool = null;
 
@@ -2336,6 +2361,7 @@ app.post("/api/queue/consume", auth, requireRole("operator", "admin", "auditor")
 });
 
 // -------- Serve static frontend (same origin) --------
+  ensureZxingVendor();
   const staticDir = path.join(__dirname, "public");
   if (fs.existsSync(staticDir)) {
     app.use("/", express.static(staticDir, { extensions: ["html"] }));

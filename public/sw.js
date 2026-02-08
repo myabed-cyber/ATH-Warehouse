@@ -1,6 +1,6 @@
 /* Minimal SW (v4) — caches static assets (excluding HTML) to avoid update traps */
 // Updated cache version after changing assets (logo image). Increment version to bust old caches.
-const CACHE = 'gs1hub-shell-v11';
+const CACHE = 'gs1hub-shell-v12';
 const ASSETS = [
   './ui.css',
   './app.js',
@@ -11,6 +11,9 @@ const ASSETS = [
   './assets/ath-medical-division.png',
   './assets/icon-192.png',
   './assets/icon-512.png',
+  './vendor/zxing-umd.min.js',
+  './logo.png',
+  './logo_header.png',
 ];
 
 self.addEventListener('install', (event) => {
