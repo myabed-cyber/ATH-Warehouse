@@ -10,7 +10,7 @@ WORKDIR /app
 
 # Install dependencies
 COPY package*.json ./
-RUN npm install --omit=dev --legacy-peer-deps npm install --omit=dev && npm cache clean --forcenpm install --omit=dev && npm cache clean --force npm cache clean --force
+RUN npm install --omit=dev && npm cache clean --force
 
 # Bundle app source
 COPY . .

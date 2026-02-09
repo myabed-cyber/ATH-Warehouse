@@ -73,14 +73,16 @@
         
         body {
             margin: 0;
-            font-family: 'Plus Jakarta Sans', sans-serif;
+            /* Use a programming-style monospace font throughout the app for a modern, technical feel */
+            font-family: 'JetBrains Mono', monospace;
             background-color: var(--bg-deep);
             color: var(--text-main);
             height: 100vh;
             overflow: hidden;
             transition: background-color 0.4s ease, color 0.4s ease;
         }
-        :lang(ar) { font-family: 'Cairo', sans-serif; }
+        /* When rendering Arabic text we still fall back to Cairo for better glyph support */
+        :lang(ar) { font-family: 'JetBrains Mono', monospace; }
 
         /* === AMBIENT ENVIRONMENT === */
         .ambient-layer { position: fixed; inset: 0; z-index: 0; overflow: hidden; pointer-events: none; }
@@ -371,6 +373,16 @@
             .topbar { padding: 10px; }
             .search-pill { width: 100%; }
         }
+
+        /* Extra small devices: stack layout and reduce padding for better mobile usability */
+        @media (max-width: 600px) {
+            .login-card { padding: 24px; }
+            .dashboard-grid { grid-template-columns: 1fr; }
+            .topbar { flex-direction: column; align-items: flex-start; height: auto; gap: 8px; padding: 12px; }
+            .search-pill { width: 100%; margin-top: 8px; }
+            .scanner-controls { flex-direction: column; align-items: stretch; gap: 8px; }
+            .scan-trigger-btn { width: 100%; }
+        }
     </style>
 </head>
 <body>
@@ -393,7 +405,8 @@
                     <div style="text-align: center;">
                         <!-- Replace generic cube icon with the actual ATH logo image -->
                         <div style="display:flex; justify-content:center; margin-bottom:20px;">
-                            <img src="./assets/ath-medical-division.png" alt="ATH Medical Division" style="width:80px; height:80px; border-radius:20px; object-fit:contain; box-shadow:0 20px 50px var(--brand-glow);"/>
+                            <!-- Increase logo size on the login card for better visibility -->
+                            <img src="./assets/ath-medical-division.png" alt="ATH Medical Division" style="width:160px; height:160px; border-radius:20px; object-fit:contain; box-shadow:0 20px 50px var(--brand-glow);"/>
                         </div>
                         <h1 style="margin: 0; font-size: 26px; font-weight: 800;">ATH Portal <span style="color: var(--brand-primary)">Ultra</span></h1>
                         <p style="color: var(--text-muted); margin: 8px 0 32px;">Advanced Warehouse Management</p>
@@ -420,7 +433,8 @@
                 <aside class="sidebar glass-panel">
                     <div style="display: flex; align-items: center; gap: 12px; padding: 0 12px 20px;">
                         <!-- Swap sidebar cube icon with the ATH logo image -->
-                        <div style="width:36px; height:36px; border-radius:10px; overflow:hidden;">
+                        <!-- Enlarge sidebar logo so it is clearly visible -->
+                        <div style="width:64px; height:64px; border-radius:12px; overflow:hidden;">
                             <img src="./assets/ath-medical-division.png" alt="ATH" style="width:100%; height:100%; object-fit:contain;"/>
                         </div>
                         <div>
@@ -719,6 +733,80 @@
             }
         }
 
+        /**
+         * Continuously detect barcodes using the native BarcodeDetector API. When a code is found
+         * it is displayed via the toast mechanism and scanning stops. If no code is detected
+         * within the timeout period the scan is aborted with a warning. This function assumes
+         * the camera has already been started via startCamera().
+         */
+        async function startBarcodeScan() {
+            const videoEl = document.getElementById('scanVideo');
+            const hintEl = document.getElementById('scanHint');
+            if (!videoEl || !('BarcodeDetector' in window)) {
+                if (hintEl) hintEl.innerText = 'Barcode detection not supported.';
+                return;
+            }
+            try {
+                const formats = ['qr_code','code_128','code_39','ean_13','ean_8','upc_a','upc_e','itf','data_matrix','pdf417','aztec'];
+                const detector = new window.BarcodeDetector({ formats });
+                const startTime = Date.now();
+                const timeoutMs = 25000;
+                const tick = async () => {
+                    if (!videoEl || videoEl.readyState < 2) {
+                        requestAnimationFrame(tick);
+                        return;
+                    }
+                    try {
+                        const codes = await detector.detect(videoEl);
+                        if (codes && codes.length) {
+                            const raw = codes[0].rawValue || codes[0].data || '';
+                            try { sfx.play('success'); } catch {}
+                            showToast('Scan Result', raw, 'success');
+                            // finish scanning
+                            // Reset UI to standby
+                            const scanner = document.getElementById('globalScanner');
+                            const status = document.getElementById('scannerStatus');
+                            const btn = document.querySelector('.scan-trigger-btn');
+                            state.scanning = false;
+                            if (scanner) scanner.classList.remove('active');
+                            if (status) {
+                                status.innerText = 'STANDBY';
+                                status.style.color = 'var(--brand-primary)';
+                            }
+                            if (btn) btn.innerHTML = `<i class="ph-bold ph-aperture"></i> SCAN`;
+                            document.getElementById('scanModal')?.classList.remove('show');
+                            stopCamera();
+                            return;
+                        }
+                    } catch (err) {
+                        // Ignore transient errors during detection
+                    }
+                    if (Date.now() - startTime > timeoutMs) {
+                        // Timeout
+                        try { sfx.play('click'); } catch {}
+                        showToast('Scan Timeout', 'No code detected', 'warn');
+                        const scanner = document.getElementById('globalScanner');
+                        const status = document.getElementById('scannerStatus');
+                        const btn = document.querySelector('.scan-trigger-btn');
+                        state.scanning = false;
+                        if (scanner) scanner.classList.remove('active');
+                        if (status) {
+                            status.innerText = 'STANDBY';
+                            status.style.color = 'var(--brand-primary)';
+                        }
+                        if (btn) btn.innerHTML = `<i class="ph-bold ph-aperture"></i> SCAN`;
+                        document.getElementById('scanModal')?.classList.remove('show');
+                        stopCamera();
+                        return;
+                    }
+                    requestAnimationFrame(tick);
+                };
+                tick();
+            } catch (e) {
+                if (hintEl) hintEl.innerText = 'Barcode detection failed.';
+            }
+        }
+
         function triggerScan() {
             const scanner = el('globalScanner');
             const status = el('scannerStatus');
@@ -737,10 +825,14 @@
                 }
                 if (btn) btn.innerHTML = `<i class="ph-bold ph-spinner" style="animation: spin 1s infinite linear"></i> STOP`;
 
-                // Show scan modal and start camera
+                // Show scan modal and start camera, then begin barcode detection
                 const modal = document.getElementById('scanModal');
                 if (modal) modal.classList.add('show');
-                startCamera();
+                // Start the camera stream
+                startCamera().then(() => {
+                    // Begin the detection loop once the camera is ready
+                    startBarcodeScan();
+                });
             } else {
                 // Stop scan UI
                 sfx.click();
@@ -809,56 +901,5 @@
     </script>
 
     <script src="/wow-bindings.js"></script>
-
-    <!-- Override the default scan handler from wow-bindings to integrate the custom camera modal.
-         The built-in bindings assign window.triggerScan to doScanFlow() which prompts fallback input if camera
-         is unavailable. To ensure our camera overlay and permission request are used instead, we reassign
-         window.triggerScan here after wow-bindings.js has loaded. -->
-    <script>
-        // Use the helpers defined earlier (startCamera/stopCamera) to implement the scan flow.
-        // Toggling state.scanning controls the sidebar indicator; this mirrors the WOW behaviour
-        // but integrates the camera modal defined in this page.
-        (function() {
-            // Guard against missing global objects
-            const stateRef = window.state || { scanning: false };
-            const sfxRef = window.sfx || { play: () => {} };
-
-            window.triggerScan = function() {
-                // Toggle scanning state
-                stateRef.scanning = !stateRef.scanning;
-
-                const scanner = document.getElementById('globalScanner');
-                const status = document.getElementById('scannerStatus');
-                const btn = document.querySelector('.scan-trigger-btn');
-                const modal = document.getElementById('scanModal');
-
-                if (stateRef.scanning) {
-                    // Activate UI
-                    try { sfxRef.play('scan_start'); } catch {}
-                    if (scanner) scanner.classList.add('active');
-                    if (status) {
-                        status.innerText = 'ACTIVE CAPTURE';
-                        status.style.color = 'var(--tactical-red)';
-                    }
-                    if (btn) btn.innerHTML = `<i class="ph-bold ph-spinner" style="animation: spin 1s infinite linear"></i> STOP`;
-                    // Show modal and start the camera
-                    if (modal) modal.classList.add('show');
-                    if (typeof startCamera === 'function') startCamera();
-                } else {
-                    // Deactivate UI
-                    try { sfxRef.play('click'); } catch {}
-                    if (scanner) scanner.classList.remove('active');
-                    if (status) {
-                        status.innerText = 'STANDBY';
-                        status.style.color = 'var(--brand-primary)';
-                    }
-                    if (btn) btn.innerHTML = `<i class="ph-bold ph-aperture"></i> SCAN`;
-                    // Hide modal and stop camera
-                    if (modal) modal.classList.remove('show');
-                    if (typeof stopCamera === 'function') stopCamera();
-                }
-            };
-        })();
-    </script>
 </body>
 </html>
