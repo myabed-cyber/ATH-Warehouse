@@ -406,7 +406,9 @@
                         <!-- Replace generic cube icon with the actual ATH logo image -->
                         <div style="display:flex; justify-content:center; margin-bottom:20px;">
                             <!-- Increase logo size on the login card for better visibility -->
-                            <img src="./assets/ath-medical-division.png" alt="ATH Medical Division" style="width:160px; height:160px; border-radius:20px; object-fit:contain; box-shadow:0 20px 50px var(--brand-glow);"/>
+                            <!-- Increase the login logo further for better prominence on large screens -->
+                            <!-- Further enlarge the login logo for maximum visibility -->
+                            <img src="./assets/ath-medical-division.png" alt="ATH Medical Division" style="width:240px; height:240px; border-radius:20px; object-fit:contain; box-shadow:0 20px 50px var(--brand-glow);"/>
                         </div>
                         <h1 style="margin: 0; font-size: 26px; font-weight: 800;">ATH Portal <span style="color: var(--brand-primary)">Ultra</span></h1>
                         <p style="color: var(--text-muted); margin: 8px 0 32px;">Advanced Warehouse Management</p>
@@ -434,7 +436,9 @@
                     <div style="display: flex; align-items: center; gap: 12px; padding: 0 12px 20px;">
                         <!-- Swap sidebar cube icon with the ATH logo image -->
                         <!-- Enlarge sidebar logo so it is clearly visible -->
-                        <div style="width:64px; height:64px; border-radius:12px; overflow:hidden;">
+                        <!-- Enlarge the sidebar logo so it is clearly visible on all devices -->
+                        <div style="width:96px; height:96px; border-radius:12px; overflow:hidden;">
+                            <!-- Further enlarge the sidebar logo for improved legibility -->
                             <img src="./assets/ath-medical-division.png" alt="ATH" style="width:100%; height:100%; object-fit:contain;"/>
                         </div>
                         <div>
@@ -742,8 +746,12 @@
         async function startBarcodeScan() {
             const videoEl = document.getElementById('scanVideo');
             const hintEl = document.getElementById('scanHint');
-            if (!videoEl || !('BarcodeDetector' in window)) {
-                if (hintEl) hintEl.innerText = 'Barcode detection not supported.';
+            if (!videoEl) return;
+            // Prefer native BarcodeDetector if available
+            const hasBD = (typeof window.BarcodeDetector === 'function');
+            if (!hasBD) {
+                // Fall back to ZXing if supported
+                await startZXingScan();
                 return;
             }
             try {
@@ -762,20 +770,7 @@
                             const raw = codes[0].rawValue || codes[0].data || '';
                             try { sfx.play('success'); } catch {}
                             showToast('Scan Result', raw, 'success');
-                            // finish scanning
-                            // Reset UI to standby
-                            const scanner = document.getElementById('globalScanner');
-                            const status = document.getElementById('scannerStatus');
-                            const btn = document.querySelector('.scan-trigger-btn');
-                            state.scanning = false;
-                            if (scanner) scanner.classList.remove('active');
-                            if (status) {
-                                status.innerText = 'STANDBY';
-                                status.style.color = 'var(--brand-primary)';
-                            }
-                            if (btn) btn.innerHTML = `<i class="ph-bold ph-aperture"></i> SCAN`;
-                            document.getElementById('scanModal')?.classList.remove('show');
-                            stopCamera();
+                            finishScan();
                             return;
                         }
                     } catch (err) {
@@ -785,18 +780,7 @@
                         // Timeout
                         try { sfx.play('click'); } catch {}
                         showToast('Scan Timeout', 'No code detected', 'warn');
-                        const scanner = document.getElementById('globalScanner');
-                        const status = document.getElementById('scannerStatus');
-                        const btn = document.querySelector('.scan-trigger-btn');
-                        state.scanning = false;
-                        if (scanner) scanner.classList.remove('active');
-                        if (status) {
-                            status.innerText = 'STANDBY';
-                            status.style.color = 'var(--brand-primary)';
-                        }
-                        if (btn) btn.innerHTML = `<i class="ph-bold ph-aperture"></i> SCAN`;
-                        document.getElementById('scanModal')?.classList.remove('show');
-                        stopCamera();
+                        finishScan();
                         return;
                     }
                     requestAnimationFrame(tick);
@@ -805,6 +789,85 @@
             } catch (e) {
                 if (hintEl) hintEl.innerText = 'Barcode detection failed.';
             }
+        }
+
+        /**
+         * Load the ZXing library from a CDN if not already loaded. Returns a promise
+         * that resolves once ZXing is available on window.ZXing or window.ZXingBrowser.
+         */
+        function ensureZXing() {
+            return new Promise((resolve, reject) => {
+                if (window.ZXingBrowser || window.ZXing) { resolve(); return; }
+                const script = document.createElement('script');
+                // Use jsDelivr to load a stable UMD build of the ZXing library. Adjust version as needed.
+                script.src = 'https://cdn.jsdelivr.net/npm/@zxing/library@0.20.0/umd/index.min.js';
+                script.onload = () => resolve();
+                script.onerror = () => reject(new Error('Failed to load ZXing')); 
+                document.head.appendChild(script);
+            });
+        }
+
+        /**
+         * Start scanning using ZXing. Loads the library on demand and then decodes
+         * from the current video stream. Similar timeout handling as the native
+         * BarcodeDetector flow.
+         */
+        async function startZXingScan() {
+            const videoEl = document.getElementById('scanVideo');
+            const hintEl = document.getElementById('scanHint');
+            if (!videoEl) return;
+            try {
+                await ensureZXing();
+                const Z = window.ZXingBrowser || window.ZXing;
+                if (!Z) throw new Error('ZXing not available');
+                // Prefer BrowserMultiFormatReader if present
+                const ReaderCtor = Z.BrowserMultiFormatReader || Z.BrowserMultiFormatContinuousReader || Z.BrowserQRCodeReader;
+                if (!ReaderCtor) throw new Error('Unsupported ZXing bundle');
+                const reader = new ReaderCtor();
+                const startTime = Date.now();
+                const timeoutMs = 30000;
+                // Start decoding from the existing camera stream
+                const controls = await reader.decodeFromVideoDevice(null, videoEl, (result) => {
+                    if (result) {
+                        const txt = typeof result.getText === 'function' ? result.getText() : (result.text || result.rawValue || String(result));
+                        try { sfx.play('success'); } catch {}
+                        showToast('Scan Result', txt, 'success');
+                        // stop decoding and camera
+                        controls?.stop?.();
+                        finishScan();
+                    }
+                });
+                // Set up timeout fallback
+                const timer = setInterval(() => {
+                    if (Date.now() - startTime > timeoutMs) {
+                        clearInterval(timer);
+                        try { sfx.play('click'); } catch {}
+                        showToast('Scan Timeout', 'No code detected', 'warn');
+                        controls?.stop?.();
+                        finishScan();
+                    }
+                }, 500);
+            } catch (err) {
+                if (hintEl) hintEl.innerText = 'ZXing failed: ' + (err.message || err);
+            }
+        }
+
+        /**
+         * Common cleanup when a scan ends, either via success, timeout or stop. Resets UI and camera.
+         */
+        function finishScan() {
+            const scanner = document.getElementById('globalScanner');
+            const status = document.getElementById('scannerStatus');
+            const btn = document.querySelector('.scan-trigger-btn');
+            state.scanning = false;
+            if (scanner) scanner.classList.remove('active');
+            if (status) {
+                status.innerText = 'STANDBY';
+                status.style.color = 'var(--brand-primary)';
+            }
+            if (btn) btn.innerHTML = `<i class="ph-bold ph-aperture"></i> SCAN`;
+            document.getElementById('scanModal')?.classList.remove('show');
+            stopCamera();
         }
 
         function triggerScan() {
@@ -901,5 +964,16 @@
     </script>
 
     <script src="/wow-bindings.js"></script>
+    <!-- Ensure our custom scan implementation is used instead of WOW's default. 
+         After wow-bindings.js loads and overrides window.triggerScan, reassign it
+         back to our custom triggerScan function defined above.  -->
+    <script>
+        // Defer reassignment until bindings have executed
+        window.addEventListener('DOMContentLoaded', function() {
+            if (typeof triggerScan === 'function') {
+                window.triggerScan = triggerScan;
+            }
+        });
+    </script>
 </body>
 </html>
