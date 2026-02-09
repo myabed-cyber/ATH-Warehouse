@@ -1249,6 +1249,10 @@
     };
 
     window.triggerScan = function () {
+      // If the UI defines a custom scan modal (public/index.html), use it.
+      if (typeof window.__ATH_CUSTOM_TRIGGER_SCAN__ === "function") {
+        return window.__ATH_CUSTOM_TRIGGER_SCAN__();
+      }
       doScanFlow().catch((e) => toast(e.message || "Scan failed", "error"));
     };
   }
