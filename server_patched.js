@@ -551,98 +551,268 @@ function parseExpiryYYMMDD(v) {
   return { iso, y: fullYear, m: mm, d: day };
 }
 
+export // ---------------- Multi-Barcode Parse (GS1 + GTIN/EAN/UPC + SSCC + QR payloads) ----------------
+
+function mod10CheckDigit(num) {
+  // Returns the expected Mod10 check digit for the provided numeric string WITHOUT the check digit.
+  // Used for GTIN/SSCC check digit validation.
+  const s = String(num || "").replace(/\D/g, "");
+  let sum = 0;
+  // GS1 Mod10: starting from the rightmost digit, weight 3,1,3,1...
+  let w = 3;
+  for (let i = s.length - 1; i >= 0; i--) {
+    sum += (s.charCodeAt(i) - 48) * w;
+    w = (w === 3) ? 1 : 3;
+  }
+  return String((10 - (sum % 10)) % 10);
+}
+
+function isValidMod10(value) {
+  const v = String(value || "");
+  if (!/^\d+$/.test(v) || v.length < 2) return false;
+  const body = v.slice(0, -1);
+  const cd = v.slice(-1);
+  return mod10CheckDigit(body) === cd;
+}
+
+function guessNumericKind(norm) {
+  if (!/^\d+$/.test(norm)) return null;
+  const n = norm.length;
+  if (n === 8) return "EAN8";
+  if (n === 12) return "UPCA";
+  if (n === 13) return "EAN13";
+  if (n === 14) return "GTIN14";
+  if (n === 18) return "SSCC18";
+  return null;
+}
+
+// A practical GS1 AI set for "most common" healthcare + warehouse workflows.
+// This is NOT the full GS1 spec, but covers the famous / frequent AIs.
+const GS1_AI = {
+  // fixed length
+  "00": { fixed: true, len: 18, name: "SSCC" },
+  "01": { fixed: true, len: 14, name: "GTIN" },
+  "02": { fixed: true, len: 14, name: "CONTENT_GTIN" },
+  "11": { fixed: true, len: 6, name: "PROD_DATE" },
+  "12": { fixed: true, len: 6, name: "DUE_DATE" },
+  "13": { fixed: true, len: 6, name: "PACK_DATE" },
+  "15": { fixed: true, len: 6, name: "BEST_BEFORE" },
+  "17": { fixed: true, len: 6, name: "EXPIRY" },
+  "20": { fixed: true, len: 2, name: "VARIANT" },
+  "402": { fixed: true, len: 17, name: "GIN" },
+  "410": { fixed: true, len: 13, name: "SHIP_TO_GLN" },
+  "411": { fixed: true, len: 13, name: "BILL_TO" },
+  "412": { fixed: true, len: 13, name: "PURCHASE_FROM" },
+  "413": { fixed: true, len: 13, name: "SHIP_FOR" },
+  "414": { fixed: true, len: 13, name: "LOC_NO" },
+  "415": { fixed: true, len: 13, name: "PAY_TO" },
+  "416": { fixed: true, len: 13, name: "PROD_SERV_LOC" },
+  "7003": { fixed: true, len: 10, name: "EXP_TIME" },
+  "8018": { fixed: true, len: 18, name: "GSRN" },
+
+  // variable length (up to max), terminated by GS (ASCII 29) when concatenated
+  "10": { fixed: false, max: 20, name: "BATCH_LOT" },
+  "21": { fixed: false, max: 20, name: "SERIAL" },
+  "22": { fixed: false, max: 29, name: "CPV" },
+  "30": { fixed: false, max: 8, name: "VAR_COUNT" },
+  "37": { fixed: false, max: 8, name: "COUNT" },
+  "240": { fixed: false, max: 30, name: "ADDITIONAL_ID" },
+  "241": { fixed: false, max: 30, name: "CUST_PART" },
+  "242": { fixed: false, max: 6, name: "MTO_VARIANT" },
+  "243": { fixed: false, max: 20, name: "PCN" },
+  "250": { fixed: false, max: 30, name: "SECONDARY_SERIAL" },
+  "251": { fixed: false, max: 30, name: "REF_TO_SOURCE" },
+  "400": { fixed: false, max: 30, name: "ORDER_NO" },
+  "401": { fixed: false, max: 30, name: "GINC" },
+  "8005": { fixed: false, max: 6, name: "PRICE_PER_UNIT" },
+  "8200": { fixed: false, max: 70, name: "PRODUCT_URL" },
+};
+
+const GS1_AI_KEYS = Object.keys(GS1_AI).sort((a, b) => b.length - a.length); // match 4-digit before 3/2
+
+function tryMatchAI(norm, i) {
+  for (const k of GS1_AI_KEYS) {
+    if (norm.startsWith(k, i)) return k;
+  }
+  return null;
+}
+
 export function parseGs1(norm, missingGsBehavior = "BLOCK") {
   const segments = [];
   const meta = {
+    kind: "GS1",
     used_lookahead: false,
     missing_gs_detected: false,
     missing_gs_fields: [],
+    ai_coverage: "COMMON_SET",
   };
+
   let i = 0;
 
-  const KNOWN = new Set(["01", "17", "00", "10", "21"]);
-  const isKnownAI = (ai) => KNOWN.has(ai);
-
-  // If it's pure digits, treat as GTIN only if allowed by policy (handled in decide)
-  // Numeric-only inputs can be a plain GTIN (from keyboard wedge scanners / manual entry).
-  // Treat as GTIN only for typical GTIN lengths, otherwise continue parsing as-is.
-  const isAllDigits = /^\d+$/.test(norm);
-  const numericAsGtin = isAllDigits && ([8, 12, 13, 14].includes(norm.length));
-
-
   while (i < norm.length) {
-    const ai2 = norm.slice(i, i + 2);
-
-    if (numericAsGtin) {
-      segments.push({ ai: "01", value: gtinTo14(norm), source: "NUMERIC_AS_GTIN" });
+    const ai = tryMatchAI(norm, i);
+    if (!ai) {
+      // Not a known AI at this position → stop (unknown tail)
+      segments.push({ ai: "??", value: norm.slice(i) });
       break;
     }
 
-    if (ai2 === "01") {
-      const v = norm.slice(i + 2, i + 16);
-      segments.push({ ai: "01", value: v });
-      i += 16;
-      continue;
-    }
-    if (ai2 === "17") {
-      const v = norm.slice(i + 2, i + 8);
-      segments.push({ ai: "17", value: v });
-      i += 8;
-      continue;
-    }
-    if (ai2 === "00") {
-      const v = norm.slice(i + 2, i + 20);
-      segments.push({ ai: "00", value: v });
-      i += 20;
-      continue;
-    }
-    if (ai2 === "10" || ai2 === "21") {
-      const ai = ai2;
-      i += 2;
-      let j = i;
-      let boundaryByAI = null;
+    const spec = GS1_AI[ai];
+    i += ai.length;
 
-      // Scan until GS, or until next known AI (boundary inference)
-      while (j < norm.length) {
-        if (norm[j] === GS) break;
-        const next2 = norm.slice(j, j + 2);
-        if (isKnownAI(next2) && j > i) {
-          boundaryByAI = j;
-          break;
-        }
-        j++;
+    // Fixed
+    if (spec.fixed) {
+      const v = norm.slice(i, i + spec.len);
+      if (v.length < spec.len) {
+        segments.push({ ai, value: v, meta: { truncated: true } });
+        break;
+      }
+      segments.push({ ai, value: v });
+      i += spec.len;
+      continue;
+    }
+
+    // Variable: consume until GS or next AI boundary (missing GS inference) or max
+    let j = i;
+    let boundaryByAI = null;
+
+    while (j < norm.length) {
+      if (norm[j] === GS) break;
+
+      const nextAI = tryMatchAI(norm, j);
+      if (nextAI && j > i) {
+        boundaryByAI = j;
+        break;
       }
 
-      if (boundaryByAI !== null) {
-        // We detected a next AI without GS separator => Missing GS situation.
-        meta.missing_gs_detected = true;
-        meta.missing_gs_fields.push(ai);
-        if (missingGsBehavior === "LOOKAHEAD") meta.used_lookahead = true;
+      // enforce max length softly (spec.max)
+      if (spec.max && (j - i) >= spec.max) break;
+      j++;
+    }
 
-        // In BOTH modes, parse using the inferred boundary to keep visibility,
-        // but in BLOCK mode the validator will BLOCK explicitly.
-        segments.push({ ai, value: norm.slice(i, boundaryByAI), meta: { missing_gs: true } });
-        i = boundaryByAI; // do not consume boundary; next loop will parse next AI
-        continue;
-      }
+    if (boundaryByAI !== null) {
+      meta.missing_gs_detected = true;
+      meta.missing_gs_fields.push(ai);
+      if (String(missingGsBehavior || "BLOCK").toUpperCase() === "LOOKAHEAD") meta.used_lookahead = true;
 
-      // No boundary by AI; consume until GS or end
-      segments.push({ ai, value: norm.slice(i, j) });
-      i = norm[j] === GS ? j + 1 : j;
+      segments.push({ ai, value: norm.slice(i, boundaryByAI), meta: { missing_gs: true } });
+      i = boundaryByAI;
       continue;
     }
 
-    segments.push({ ai: "??", value: norm.slice(i) });
-    break;
+    const v = norm.slice(i, j);
+    const hitMax = spec.max && v.length >= spec.max && norm[j] !== GS && j < norm.length;
+    segments.push({ ai, value: v, ...(hitMax ? { meta: { max_len_reached: true } } : {}) });
+
+    i = norm[j] === GS ? j + 1 : j;
   }
 
   return { segments, meta };
+}
+
+function parseNonGs1(norm, raw_string, context) {
+  const meta = {
+    kind: "NON_GS1",
+    symbology_hint: null,
+    additional_checks: [],
+  };
+
+  // Symbology hint from UI context (if provided)
+  const hint = context && (context.barcode_format || context.format || context.symbology);
+  if (hint) meta.symbology_hint = String(hint);
+
+  // Try to infer from raw symbology identifiers
+  const raw = String(raw_string || "");
+  const sym = /^\]([A-Za-z0-9]{2})/.exec(raw)?.[1] || null;
+  if (sym) meta.symbology_hint = meta.symbology_hint || `]${sym}`;
+
+  // URLs (common in QR)
+  if (/^https?:\/\//i.test(norm)) {
+    meta.kind = "URI";
+    meta.additional_checks.push({ code: "NON_PRODUCT_PAYLOAD_URI", severity: "WARN", message: "Scanned payload is a URL (QR). Not a GS1 product identifier." });
+    return { segments: [{ ai: "URI", value: norm }], meta };
+  }
+
+  // JSON (common in QR)
+  if ((norm.startsWith("{") && norm.endsWith("}")) || (norm.startsWith("[") && norm.endsWith("]"))) {
+    try {
+      const obj = JSON.parse(norm);
+      meta.kind = "JSON";
+      meta.additional_checks.push({ code: "NON_PRODUCT_PAYLOAD_JSON", severity: "WARN", message: "Scanned payload is JSON (QR). Not a GS1 product identifier." });
+      return { segments: [{ ai: "JSON", value: norm }], meta: { ...meta, json_preview: Array.isArray(obj) ? "array" : "object" } };
+    } catch {
+      // fall through
+    }
+  }
+
+  // Pure numeric famous types (EAN/UPC/GTIN/SSCC)
+  const nk = guessNumericKind(norm);
+  if (nk) {
+    if (nk === "SSCC18") {
+      meta.kind = "SSCC";
+      const segs = [{ ai: "00", value: norm, source: nk }];
+      // validate mod10
+      if (!isValidMod10(norm)) {
+        meta.additional_checks.push({ code: "SSCC_CHECKDIGIT_INVALID", severity: "BLOCK", message: "Invalid SSCC check digit (Mod10)." });
+      }
+      return { segments: segs, meta };
+    }
+    // GTIN family
+    meta.kind = "GTIN";
+    const gtin14 = gtinTo14(norm);
+    const segs = [{ ai: "01", value: gtin14, source: nk }];
+    // validate mod10 (GTIN check digit) using existing validator
+    if (!isValidGtin14(gtin14)) {
+      meta.additional_checks.push({ code: "GTIN_CHECKDIGIT_INVALID", severity: "BLOCK", message: "Invalid GTIN check digit (Mod10).", details: { gtin14, source: nk } });
+    }
+    return { segments: segs, meta };
+  }
+
+  // HIBC (healthcare) – best-effort detection
+  if (norm.startsWith("+") && /^[\+A-Z0-9\-\.\/\$% ]+$/i.test(norm)) {
+    meta.kind = "HIBC";
+    meta.additional_checks.push({ code: "HIBC_DETECTED", severity: "WARN", message: "HIBC-like payload detected. Parsed as opaque identifier (best-effort)." });
+    return { segments: [{ ai: "HIBC", value: norm }], meta };
+  }
+
+  // Default: treat as internal / custom identifier (Code128/Code39/ITF/PDF417/Aztec/etc.)
+  meta.kind = "ID";
+  meta.additional_checks.push({ code: "NON_GS1_ID", severity: "WARN", message: "Non-GS1 barcode payload. Stored as an opaque identifier." });
+  return { segments: [{ ai: "ID", value: norm }], meta };
+}
+
+export function parseBarcode(raw_string, policy, context) {
+  const normalized = normalizeInput(raw_string);
+
+  // Strong GS1 hints: ASCII GS separator OR symbology identifiers (]C1, ]d2, ]Q3)
+  const raw = String(raw_string || "");
+  const sym = /^\]([A-Za-z0-9]{2})/.exec(raw)?.[1] || "";
+  const symUpper = sym.toUpperCase();
+  const strongGs1 = normalized.includes(GS) || ["C1", "D2", "Q3"].includes(symUpper);
+
+  // Also treat strings starting with known AIs as GS1 (with or without separators)
+  const startsLikeAI = !!tryMatchAI(normalized, 0);
+
+  if (strongGs1 || startsLikeAI) {
+    const gs1 = parseGs1(normalized, policy?.missing_gs_behavior || "BLOCK");
+    // attach symbology hint if present
+    if (sym) gs1.meta.symbology_hint = `]${sym}`;
+    if (context && (context.barcode_format || context.format)) gs1.meta.symbology_hint = gs1.meta.symbology_hint || String(context.barcode_format || context.format);
+    return { normalized, ...gs1 };
+  }
+
+  const non = parseNonGs1(normalized, raw_string, context);
+  return { normalized, segments: non.segments, meta: non.meta };
 }
 
 export function decide(parsedResult, policy) {
   const checks = [];
   const parsed = Array.isArray(parsedResult) ? parsedResult : parsedResult?.segments || [];
   const meta = Array.isArray(parsedResult) ? {} : (parsedResult?.meta || {});
+
+  // Extra checks produced by the multi-parser (e.g., URL/JSON/HIBC/non-GS1 hints)
+  const preChecks = Array.isArray(meta?.additional_checks) ? meta.additional_checks : [];
+  for (const c of preChecks) checks.push(c);
 
   const map = {};
   for (const p of parsed) {
@@ -665,8 +835,29 @@ export function decide(parsedResult, policy) {
     });
   }
 
-  // Required AI checks
-  if (!map["01"]) checks.push({ code: "REQ_AI_01_MISSING", severity: "BLOCK", message: "Missing GTIN (AI 01)." });
+  // Required primary identifier checks (famous/typical barcode families)
+  // Default behavior: require GTIN (AI 01), but allow SSCC-only workflows via policy.
+  const requireGtin = policy?.require_gtin !== false;           // default true
+  const allowSsccOnly = policy?.allow_sscc_only !== false;      // default true
+
+  if (requireGtin && !map["01"]) {
+    if (allowSsccOnly && map["00"]) {
+      checks.push({ code: "SSCC_ONLY", severity: "WARN", message: "SSCC (AI 00) detected without GTIN (AI 01)." });
+    } else {
+      checks.push({ code: "REQ_AI_01_MISSING", severity: "BLOCK", message: "Missing GTIN (AI 01)." });
+    }
+  }
+
+  // SSCC check digit (Mod10) when present
+  if (map["00"] && policy?.enforce_sscc_checkdigit !== false) {
+    if (!isValidMod10(map["00"])) {
+      // Avoid duplication if the parser already added it
+      const exists = checks.some((c) => c.code === "SSCC_CHECKDIGIT_INVALID");
+      if (!exists) checks.push({ code: "SSCC_CHECKDIGIT_INVALID", severity: "BLOCK", message: "Invalid SSCC check digit (Mod10)." });
+    }
+  }
+
+  // GTIN check digit
 
   // GTIN check digit
   if (policy.enforce_gtin_checkdigit !== false && map["01"]) {
@@ -993,15 +1184,15 @@ app.use((req, res, next) => {
     }
 
     const policy = await getActivePolicy();
-    const normalized = normalizeInput(raw_string);
-    const parsedResult = parseGs1(normalized, policy.missing_gs_behavior || "BLOCK");
-    const { decision, checks, meta } = decide(parsedResult, policy);
+    const parsedBundle = parseBarcode(raw_string, policy, context);
+    const normalized = parsedBundle.normalized;
+    const { decision, checks, meta } = decide(parsedBundle, policy);
 
     const resp = {
       scan_id,
       decision,
       normalized,
-      parsed: parsedResult.segments,
+      parsed: parsedBundle.segments,
       parse_meta: meta,
       checks,
       policy_applied: policy,
@@ -1020,7 +1211,7 @@ app.use((req, res, next) => {
         parsed=EXCLUDED.parsed,
         context=EXCLUDED.context
     `,
-      [scanRowId, scan_id, raw_string, normalized, decision, checks, parsedResult.segments, context]
+      [scanRowId, scan_id, raw_string, normalized, decision, checks, parsedBundle.segments, context]
     );
 
     await putIdemRecord({ key: idem, request_hash, response: resp });
@@ -2138,15 +2329,40 @@ function uiParsedFromSegments(segments, raw) {
     if (s && s.ai && s.ai !== "??") ai[s.ai] = s.value;
   }
   const out = { ai, raw: String(raw || "") };
+
+  // Common GS1 fields
+  if (ai["00"]) out.sscc = ai["00"];
   if (ai["01"]) out.gtin = ai["01"];
+  if (ai["02"]) out.content_gtin = ai["02"];
   if (ai["10"]) out.lot = ai["10"];
+  if (ai["11"]) out.prod_date = ai["11"];
+  if (ai["12"]) out.due_date = ai["12"];
+  if (ai["13"]) out.pack_date = ai["13"];
+  if (ai["15"]) out.best_before = ai["15"];
   if (ai["17"]) out.expiry = ai["17"];
   if (ai["21"]) out.serial = ai["21"];
   if (ai["30"] || ai["37"]) out.qty = ai["30"] || ai["37"];
+  if (ai["240"]) out.additional_id = ai["240"];
+  if (ai["241"]) out.customer_part = ai["241"];
+  if (ai["400"]) out.order_no = ai["400"];
+  if (ai["414"]) out.location_gln = ai["414"];
+
+  // Non-GS1 payload helpers (QR / custom codes)
+  if (ai["URI"]) out.uri = ai["URI"];
+  if (ai["JSON"]) out.json = ai["JSON"];
+  if (ai["HIBC"]) out.hibc = ai["HIBC"];
+  if (ai["ID"]) out.id = ai["ID"];
+
+  // Derived dates
   if (out.expiry && /^\d{6}$/.test(out.expiry)) {
     const pe = parseExpiryYYMMDD(out.expiry);
     if (!pe.error) out.expiry_iso = pe.iso;
   }
+  if (out.best_before && /^\d{6}$/.test(out.best_before)) {
+    const pe = parseExpiryYYMMDD(out.best_before);
+    if (!pe.error) out.best_before_iso = pe.iso;
+  }
+
   return out;
 }
 
@@ -2165,14 +2381,13 @@ app.post("/api/parse-validate", auth, requireRole("operator", "admin", "auditor"
     });
   }
 
-  const normalized = normalizeInput(raw);
-  const parsedResult = parseGs1(normalized, NO_BLOCK ? "LOOKAHEAD" : (policy.missing_gs_behavior || "BLOCK"));
-  const d = decide(parsedResult, policy);
+  const parsedBundle = parseBarcode(raw, policy, { template: "LEGACY_UI" });
+  const d = decide(parsedBundle, policy);
 
   res.json({
     decision: d.decision,
-    normalized,
-    parsed: uiParsedFromSegments(parsedResult.segments, raw),
+    normalized: parsedBundle.normalized,
+    parsed: uiParsedFromSegments(parsedBundle.segments, raw),
     parse_meta: d.meta,
     checks: d.checks,
     policy_applied: policy,
@@ -2192,12 +2407,11 @@ app.post("/api/parse", auth, requireRole("operator", "admin", "auditor"), async 
       policy_applied: policy,
     });
   }
-  const normalized = normalizeInput(raw);
-  const parsedResult = parseGs1(normalized, NO_BLOCK ? "LOOKAHEAD" : (policy.missing_gs_behavior || "BLOCK"));
+  const parsedBundle = parseBarcode(raw, policy, { template: "LEGACY_UI" });
   return res.json({
-    normalized,
-    parsed: uiParsedFromSegments(parsedResult.segments, raw),
-    parse_meta: parsedResult.meta || {},
+    normalized: parsedBundle.normalized,
+    parsed: uiParsedFromSegments(parsedBundle.segments, raw),
+    parse_meta: parsedBundle.meta || {},
     policy_applied: policy,
   });
 });
@@ -2214,12 +2428,11 @@ app.post("/api/validate", auth, requireRole("operator", "admin", "auditor"), asy
       policy_applied: policy,
     });
   }
-  const normalized = normalizeInput(raw);
-  const parsedResult = parseGs1(normalized, NO_BLOCK ? "LOOKAHEAD" : (policy.missing_gs_behavior || "BLOCK"));
-  const d = decide(parsedResult, policy);
+  const parsedBundle = parseBarcode(raw, policy, { template: "LEGACY_UI" });
+  const d = decide(parsedBundle, policy);
   return res.json({
     decision: d.decision,
-    normalized,
+    normalized: parsedBundle.normalized,
     checks: d.checks,
     parse_meta: d.meta,
     policy_applied: policy,
@@ -2247,9 +2460,9 @@ app.post("/api/commit", auth, requireRole("operator", "admin", "auditor"), async
   // Create/Upsert a scan row (so dashboards/audit work)
   const scan_id = `UI-${Date.now()}-${String(Math.floor(Math.random() * 1e6)).padStart(6, "0")}`;
   const policy = await getActivePolicy();
-  const normalized = normalizeInput(raw);
-  const parsedResult = raw ? parseGs1(normalized, NO_BLOCK ? "LOOKAHEAD" : (policy.missing_gs_behavior || "BLOCK")) : { segments: [], meta: {} };
-  const d = decide(parsedResult, policy);
+  const parsedBundle = raw ? parseBarcode(raw, policy, { template, commitType, source: "ui_commit" }) : { normalized: "", segments: [], meta: {} };
+  const normalized = parsedBundle.normalized || "";
+  const d = decide(parsedBundle, policy);
 
   const scanRowId = `SCAN-${scan_id}`;
   const context = { source: "ui_commit", template, client_ts: req.body?.client_ts || nowIso(), commitType };
@@ -2266,7 +2479,7 @@ app.post("/api/commit", auth, requireRole("operator", "admin", "auditor"), async
       parsed=EXCLUDED.parsed,
       context=EXCLUDED.context
   `,
-    [scanRowId, scan_id, raw, normalized, d.decision, d.checks, parsedResult.segments, context]
+    [scanRowId, scan_id, raw, normalized, d.decision, d.checks, parsedBundle.segments, context]
   );
 
   // Simulated BC result (same format as /api/postings/commit)

@@ -122,6 +122,7 @@
     zxingReady: false,
     scannerBusy: false,
     pagesReady: false,
+    lastBarcodeFormat: null,
   };
 
   function setToken(tok) {
@@ -629,6 +630,7 @@
               const codes = await detector.detect(vid);
               if (codes && codes.length) {
                 const v = codes[0].rawValue || codes[0].data || "";
+                try { state.lastBarcodeFormat = codes[0].format || null; } catch {}
                 resolve(String(v));
                 return;
               }
@@ -707,7 +709,7 @@
   async function submitScan(raw) {
     const scan_id = `WOW-${Date.now()}-${String(Math.floor(Math.random() * 1e6)).padStart(6, "0")}`;
     const idem = uuid();
-    const context = { template: "WOW", client_ts: new Date().toISOString(), ui: "WOW" };
+    const context = { template: "WOW", client_ts: new Date().toISOString(), ui: "WOW", barcode_format: state.lastBarcodeFormat || null };
     const payload = { scan_id, raw_string: raw, context };
 
     const resp = await api("/api/scans/parse-validate", {

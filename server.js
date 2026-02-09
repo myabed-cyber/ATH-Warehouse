@@ -406,98 +406,547 @@ function parseExpiryYYMMDD(v) {
   return { iso, y: fullYear, m: mm, d: day };
 }
 
+export // ---------------- Multi-Barcode Parse (GS1 + GTIN/EAN/UPC + SSCC + QR payloads) ----------------
+
+function mod10CheckDigit(num) {
+  // Returns the expected Mod10 check digit for the provided numeric string WITHOUT the check digit.
+  // Used for GTIN/SSCC check digit validation.
+  const s = String(num || "").replace(/\D/g, "");
+  let sum = 0;
+  // GS1 Mod10: starting from the rightmost digit, weight 3,1,3,1...
+  let w = 3;
+  for (let i = s.length - 1; i >= 0; i--) {
+    sum += (s.charCodeAt(i) - 48) * w;
+    w = (w === 3) ? 1 : 3;
+  }
+  return String((10 - (sum % 10)) % 10);
+}
+
+function isValidMod10(value) {
+  const v = String(value || "");
+  if (!/^\d+$/.test(v) || v.length < 2) return false;
+  const body = v.slice(0, -1);
+  const cd = v.slice(-1);
+  return mod10CheckDigit(body) === cd;
+}
+
+function guessNumericKind(norm) {
+  if (!/^\d+$/.test(norm)) return null;
+  const n = norm.length;
+  if (n === 8) return "EAN8";
+  if (n === 12) return "UPCA";
+  if (n === 13) return "EAN13";
+  if (n === 14) return "GTIN14";
+  if (n === 18) return "SSCC18";
+  return null;
+}
+
+// A practical GS1 AI set for "most common" healthcare + warehouse workflows.
+// This is NOT the full GS1 spec, but covers the famous / frequent AIs.
+const GS1_AI = {
+  // fixed length
+  "00": { fixed: true, len: 18, name: "SSCC" },
+  "01": { fixed: true, len: 14, name: "GTIN" },
+  "02": { fixed: true, len: 14, name: "CONTENT_GTIN" },
+  "11": { fixed: true, len: 6, name: "PROD_DATE" },
+  "12": { fixed: true, len: 6, name: "DUE_DATE" },
+  "13": { fixed: true, len: 6, name: "PACK_DATE" },
+  "15": { fixed: true, len: 6, name: "BEST_BEFORE" },
+  "17": { fixed: true, len: 6, name: "EXPIRY" },
+  "20": { fixed: true, len: 2, name: "VARIANT" },
+  "402": { fixed: true, len: 17, name: "GIN" },
+  "410": { fixed: true, len: 13, name: "SHIP_TO_GLN" },
+  "411": { fixed: true, len: 13, name: "BILL_TO" },
+  "412": { fixed: true, len: 13, name: "PURCHASE_FROM" },
+  "413": { fixed: true, len: 13, name: "SHIP_FOR" },
+  "414": { fixed: true, len: 13, name: "LOC_NO" },
+  "415": { fixed: true, len: 13, name: "PAY_TO" },
+  "416": { fixed: true, len: 13, name: "PROD_SERV_LOC" },
+  "7003": { fixed: true, len: 10, name: "EXP_TIME" },
+  "8018": { fixed: true, len: 18, name: "GSRN" },
+
+  // variable length (up to max), terminated by GS (ASCII 29) when concatenated
+  "10": { fixed: false, max: 20, name: "BATCH_LOT" },
+  "21": { fixed: false, max: 20, name: "SERIAL" },
+  "22": { fixed: false, max: 29, name: "CPV" },
+  "30": { fixed: false, max: 8, name: "VAR_COUNT" },
+  "37": { fixed: false, max: 8, name: "COUNT" },
+  "240": { fixed: false, max: 30, name: "ADDITIONAL_ID" },
+  "241": { fixed: false, max: 30, name: "CUST_PART" },
+  "242": { fixed: false, max: 6, name: "MTO_VARIANT" },
+  "243": { fixed: false, max: 20, name: "PCN" },
+  "250": { fixed: false, max: 30, name: "SECONDARY_SERIAL" },
+  "251": { fixed: false, max: 30, name: "REF_TO_SOURCE" },
+  "400": { fixed: false, max: 30, name: "ORDER_NO" },
+  "401": { fixed: false, max: 30, name: "GINC" },
+  "8005": { fixed: false, max: 6, name: "PRICE_PER_UNIT" },
+  "8200": { fixed: false, max: 70, name: "PRODUCT_URL" },
+};
+
+const GS1_AI_KEYS = Object.keys(GS1_AI).sort((a, b) => b.length - a.length); // match 4-digit before 3/2
+
+function tryMatchAI(norm, i) {
+  for (const k of GS1_AI_KEYS) {
+    if (norm.startsWith(k, i)) return k;
+  }
+  return null;
+}
+
 export function parseGs1(norm, missingGsBehavior = "BLOCK") {
   const segments = [];
   const meta = {
+    kind: "GS1",
     used_lookahead: false,
     missing_gs_detected: false,
     missing_gs_fields: [],
+    ai_coverage: "COMMON_SET",
   };
+
   let i = 0;
 
-  const KNOWN = new Set(["01", "17", "00", "10", "21"]);
-  const isKnownAI = (ai) => KNOWN.has(ai);
-
-  // If it's pure digits, treat as GTIN only if allowed by policy (handled in decide)
-  // Numeric-only inputs can be a plain GTIN (from keyboard wedge scanners / manual entry).
-  // Treat as GTIN only for typical GTIN lengths, otherwise continue parsing as-is.
-  const isAllDigits = /^\d+$/.test(norm);
-  const numericAsGtin = isAllDigits && ([8, 12, 13, 14].includes(norm.length));
-
-
   while (i < norm.length) {
-    const ai2 = norm.slice(i, i + 2);
-
-    if (numericAsGtin) {
-      segments.push({ ai: "01", value: gtinTo14(norm), source: "NUMERIC_AS_GTIN" });
+    const ai = tryMatchAI(norm, i);
+    if (!ai) {
+      // Not a known AI at this position → stop (unknown tail)
+      segments.push({ ai: "??", value: norm.slice(i) });
       break;
     }
 
-    if (ai2 === "01") {
-      const v = norm.slice(i + 2, i + 16);
-      segments.push({ ai: "01", value: v });
-      i += 16;
-      continue;
-    }
-    if (ai2 === "17") {
-      const v = norm.slice(i + 2, i + 8);
-      segments.push({ ai: "17", value: v });
-      i += 8;
-      continue;
-    }
-    if (ai2 === "00") {
-      const v = norm.slice(i + 2, i + 20);
-      segments.push({ ai: "00", value: v });
-      i += 20;
-      continue;
-    }
-    if (ai2 === "10" || ai2 === "21") {
-      const ai = ai2;
-      i += 2;
-      let j = i;
-      let boundaryByAI = null;
+    const spec = GS1_AI[ai];
+    i += ai.length;
 
-      // Scan until GS, or until next known AI (boundary inference)
-      while (j < norm.length) {
-        if (norm[j] === GS) break;
-        const next2 = norm.slice(j, j + 2);
-        if (isKnownAI(next2) && j > i) {
-          boundaryByAI = j;
-          break;
-        }
-        j++;
+    // Fixed
+    if (spec.fixed) {
+      const v = norm.slice(i, i + spec.len);
+      if (v.length < spec.len) {
+        segments.push({ ai, value: v, meta: { truncated: true } });
+        break;
+      }
+      segments.push({ ai, value: v });
+      i += spec.len;
+      continue;
+    }
+
+    // Variable: consume until GS or next AI boundary (missing GS inference) or max
+    let j = i;
+    let boundaryByAI = null;
+
+    while (j < norm.length) {
+      if (norm[j] === GS) break;
+
+      const nextAI = tryMatchAI(norm, j);
+      if (nextAI && j > i) {
+        boundaryByAI = j;
+        break;
       }
 
-      if (boundaryByAI !== null) {
-        // We detected a next AI without GS separator => Missing GS situation.
-        meta.missing_gs_detected = true;
-        meta.missing_gs_fields.push(ai);
-        if (missingGsBehavior === "LOOKAHEAD") meta.used_lookahead = true;
+      // enforce max length softly (spec.max)
+      if (spec.max && (j - i) >= spec.max) break;
+      j++;
+    }
 
-        // In BOTH modes, parse using the inferred boundary to keep visibility,
-        // but in BLOCK mode the validator will BLOCK explicitly.
-        segments.push({ ai, value: norm.slice(i, boundaryByAI), meta: { missing_gs: true } });
-        i = boundaryByAI; // do not consume boundary; next loop will parse next AI
-        continue;
-      }
+    if (boundaryByAI !== null) {
+      meta.missing_gs_detected = true;
+      meta.missing_gs_fields.push(ai);
+      if (String(missingGsBehavior || "BLOCK").toUpperCase() === "LOOKAHEAD") meta.used_lookahead = true;
 
-      // No boundary by AI; consume until GS or end
-      segments.push({ ai, value: norm.slice(i, j) });
-      i = norm[j] === GS ? j + 1 : j;
+      segments.push({ ai, value: norm.slice(i, boundaryByAI), meta: { missing_gs: true } });
+      i = boundaryByAI;
       continue;
     }
 
-    segments.push({ ai: "??", value: norm.slice(i) });
-    break;
+    const v = norm.slice(i, j);
+    const hitMax = spec.max && v.length >= spec.max && norm[j] !== GS && j < norm.length;
+    segments.push({ ai, value: v, ...(hitMax ? { meta: { max_len_reached: true } } : {}) });
+
+    i = norm[j] === GS ? j + 1 : j;
   }
 
   return { segments, meta };
+}
+
+
+// ---------------- HIBC + ICCBBA/ISBT-128 (best-effort) ----------------
+// NOTE: This is a pragmatic parser focused on the most common healthcare workflows:
+// - HIBC LIC primary (+LIC + PCN + UOM + Mod43 check)
+// - HIBC secondary (especially $$5 expiry YYJJJ + lot, plus common variants)
+// - ICCBBA/ISBT-128 UDI identifiers (=/, =>, =}, =,, &,1, =)
+
+const MOD43_ALPHABET = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ-. $/+%";
+const MOD43_MAP = (() => {
+  const m = {};
+  for (let i = 0; i < MOD43_ALPHABET.length; i++) m[MOD43_ALPHABET[i]] = i;
+  return m;
+})();
+
+function mod43CheckChar(data) {
+  const s = String(data || "").toUpperCase();
+  let sum = 0;
+  for (const ch of s) {
+    const v = MOD43_MAP[ch];
+    if (v === undefined) return null;
+    sum += v;
+  }
+  return MOD43_ALPHABET[sum % 43];
+}
+
+function parseJulianYYJJJ(yyjjj) {
+  const s = String(yyjjj || "");
+  if (!/^\d{5}$/.test(s)) return { error: "JULIAN_YYJJJ_INVALID" };
+  const yy = Number(s.slice(0, 2));
+  const jjj = Number(s.slice(2, 5));
+  if (jjj < 1 || jjj > 366) return { error: "JULIAN_DAY_INVALID" };
+  const year = 2000 + yy;
+  const dt = new Date(Date.UTC(year, 0, 1));
+  dt.setUTCDate(jjj);
+  const iso = dt.toISOString().slice(0, 10);
+  return { iso, y: year, jjj };
+}
+
+function parseJulianYYYJJJ(yyyjjj) {
+  const s = String(yyyjjj || "");
+  if (!/^\d{6}$/.test(s)) return { error: "JULIAN_YYYJJJ_INVALID" };
+  const yyy = Number(s.slice(0, 3));
+  const jjj = Number(s.slice(3, 6));
+  if (jjj < 1 || jjj > 366) return { error: "JULIAN_DAY_INVALID" };
+  // ICCBBA examples: 019032 => 2019-02-01
+  const year = 2000 + yyy;
+  const dt = new Date(Date.UTC(year, 0, 1));
+  dt.setUTCDate(jjj);
+  const iso = dt.toISOString().slice(0, 10);
+  return { iso, y: year, jjj };
+}
+
+function isoToYYMMDD(iso) {
+  if (!iso || !/^\d{4}-\d{2}-\d{2}$/.test(iso)) return null;
+  return `${iso.slice(2, 4)}${iso.slice(5, 7)}${iso.slice(8, 10)}`;
+}
+
+function parseHibc(norm) {
+  const meta = { kind: "HIBC", additional_checks: [] };
+
+  // Split combined primary/secondary: +LICPCNUOMC / $$...C
+  const parts = String(norm || "").split("/");
+  const primaryRaw = parts[0];
+  const secondaryRaw = parts[1] ? parts.slice(1).join("/") : null;
+
+  const p = primaryRaw.startsWith("+") ? primaryRaw.slice(1) : primaryRaw;
+  if (p.length < 7) return null; // too short to be valid HIBC primary
+
+  // Validate allowed charset (Code39)
+  if (!/^[0-9A-Z\-\.\ \$\/\+\%]+$/i.test(p)) return null;
+
+  const pCheck = p.slice(-1).toUpperCase();
+  const pUom = p.slice(-2, -1).toUpperCase();
+  const pBody = p.slice(0, -2).toUpperCase(); // LIC+PCN
+
+  const lic = pBody.slice(0, 4);
+  const pcn = pBody.slice(4);
+
+  if (!/^[A-Z0-9]{4}$/.test(lic)) return null;
+  if (!pcn || pcn.length < 1) return null;
+
+  const expected = mod43CheckChar(pBody + pUom);
+  if (!expected) {
+    meta.additional_checks.push({ code: "HIBC_MOD43_UNSUPPORTED_CHAR", severity: "WARN", message: "HIBC payload contains unsupported character(s) for Mod43." });
+  } else if (expected !== pCheck) {
+    meta.additional_checks.push({ code: "HIBC_PRIMARY_CHECKDIGIT_INVALID", severity: "BLOCK", message: "HIBC primary check character (Mod43) is invalid.", details: { expected, got: pCheck } });
+  }
+
+  // Primary ID for mapping
+  const hibcPrimaryId = `+${lic}${pcn}${pUom}${pCheck}`;
+
+  const segments = [
+    { ai: "HIBC_PRIMARY", value: hibcPrimaryId },
+    { ai: "HIBC_LIC", value: lic },
+    { ai: "HIBC_PCN", value: pcn },
+    { ai: "HIBC_UOM", value: pUom },
+    // Also provide opaque ID for generic mapping
+    { ai: "ID", value: hibcPrimaryId, source: "HIBC_PRIMARY" },
+  ];
+
+  // Parse secondary (best-effort) -> map to standard AIs (17 expiry, 10 lot, 21 serial)
+  if (secondaryRaw) {
+    const sec0 = secondaryRaw.toUpperCase();
+    const secStr = sec0.startsWith("+") ? sec0.slice(1) : sec0;
+
+    // Extract secondary check digit (last char) and validate via Mod43 using primary check as link char
+    let secData = secStr.replace(/\s+/g, "");
+    if (secData.length >= 1) {
+      const secCheck = secData.slice(-1);
+      secData = secData.slice(0, -1);
+      const secExpected = mod43CheckChar(secData + pCheck); // use primary check as link character
+      if (secExpected && secExpected !== secCheck) {
+        meta.additional_checks.push({ code: "HIBC_SECONDARY_CHECKDIGIT_INVALID", severity: "BLOCK", message: "HIBC secondary check character (Mod43) is invalid.", details: { expected: secExpected, got: secCheck } });
+      }
+    }
+
+    const pushExpiryIso = (iso, src) => {
+      const yymmdd = isoToYYMMDD(iso);
+      if (yymmdd) segments.push({ ai: "17", value: yymmdd, source: src || "HIBC" });
+      segments.push({ ai: "HIBC_EXP_ISO", value: iso });
+    };
+    const pushLot = (lot) => { if (lot) segments.push({ ai: "10", value: lot, source: "HIBC" }); };
+    const pushSerial = (serial) => { if (serial) segments.push({ ai: "21", value: serial, source: "HIBC" }); };
+
+    // Common flag patterns:
+    // $$5 + YYJJJ + LOT
+    // $$3 + YYMMDD + LOT
+    // $$2 + MMDDYY + LOT
+    // $ + LOT
+    const s = secData;
+
+    if (s.startsWith("$$")) {
+      let cursor = 2;
+      let fmt = "";
+      if (/[0-9]/.test(s[cursor] || "")) {
+        fmt = s[cursor];
+        cursor += 1;
+      }
+      if (!fmt && /^\d{5}/.test(s.slice(cursor))) fmt = "5"; // default to YYJJJ when unambiguous
+
+      if (fmt === "5" && /^\d{5}/.test(s.slice(cursor))) {
+        const yyjjj = s.slice(cursor, cursor + 5);
+        const pj = parseJulianYYJJJ(yyjjj);
+        if (!pj.error) pushExpiryIso(pj.iso, "HIBC_YYJJJ");
+        else meta.additional_checks.push({ code: pj.error, severity: "WARN", message: "Could not parse HIBC expiry date (YYJJJ)." });
+        cursor += 5;
+      } else if (fmt === "3" && /^\d{6}/.test(s.slice(cursor))) {
+        const yymmdd = s.slice(cursor, cursor + 6);
+        const pe = parseExpiryYYMMDD(yymmdd);
+        if (!pe.error) pushExpiryIso(pe.iso, "HIBC_YYMMDD");
+        else meta.additional_checks.push({ code: pe.error, severity: "WARN", message: "Could not parse HIBC expiry date (YYMMDD)." });
+        cursor += 6;
+      } else if (fmt === "2" && /^\d{6}/.test(s.slice(cursor))) {
+        const mmddyy = s.slice(cursor, cursor + 6);
+        const yy = mmddyy.slice(4, 6);
+        const mm = mmddyy.slice(0, 2);
+        const dd = mmddyy.slice(2, 4);
+        const yymmdd = `${yy}${mm}${dd}`;
+        const pe = parseExpiryYYMMDD(yymmdd);
+        if (!pe.error) pushExpiryIso(pe.iso, "HIBC_MMDDYY");
+        else meta.additional_checks.push({ code: pe.error, severity: "WARN", message: "Could not parse HIBC expiry date (MMDDYY)." });
+        cursor += 6;
+      } else {
+        meta.additional_checks.push({ code: "HIBC_SECONDARY_FORMAT_UNSUPPORTED", severity: "WARN", message: "HIBC secondary format not fully supported. Extracting lot/serial best-effort.", details: { fmt: fmt || null } });
+      }
+
+      const rest = s.slice(cursor);
+      // Heuristic: if ends with S<serial> treat as serial
+      const mSerial = /S([0-9A-Z\-\.\ \$\/\+\%]{3,})$/i.exec(rest);
+      if (mSerial) {
+        const lotPart = rest.slice(0, rest.length - mSerial[0].length);
+        pushLot(lotPart || null);
+        pushSerial(mSerial[1]);
+      } else {
+        pushLot(rest || null);
+      }
+    } else if (s.startsWith("$")) {
+      pushLot(s.slice(1) || null);
+    } else {
+      // Unclassified: try to locate YYJJJ inside, then treat remainder as lot
+      const m = /(\d{5})/.exec(s);
+      if (m) {
+        const pj = parseJulianYYJJJ(m[1]);
+        if (!pj.error) pushExpiryIso(pj.iso, "HIBC_BEST_EFFORT");
+        const after = s.slice(m.index + 5);
+        pushLot(after || null);
+      } else {
+        pushLot(s || null);
+      }
+      meta.additional_checks.push({ code: "HIBC_SECONDARY_UNCLASSIFIED", severity: "WARN", message: "HIBC secondary data could not be classified. Parsed best-effort." });
+    }
+  }
+
+  return { segments, meta };
+}
+
+function parseIsbt128(norm) {
+  const s0 = String(norm || "").replace(/\s+/g, "");
+  const hasHint = s0.startsWith("=+") || s0.includes("=/") || s0.includes("=>") || s0.includes("=}") || s0.includes("=,") || s0.includes("&,1");
+  if (!hasHint) return null;
+
+  const meta = { kind: "ISBT_128", additional_checks: [] };
+  const segments = [];
+
+  // Compound message header (if present)
+  if (s0.startsWith("=+") && s0.length >= 7) meta.compound_header = s0.slice(0, 7); // e.g., =+06000
+
+  const tokens = ["=/", "=,", "=>", "=}", "&,1", "="];
+  const findNext = (str, from) => {
+    let best = null;
+    for (const t of tokens) {
+      const idx = str.indexOf(t, from);
+      if (idx === -1) continue;
+      if (best === null || idx < best.idx || (idx === best.idx && t.length > best.t.length)) best = { idx, t };
+    }
+    return best;
+  };
+
+  let pos = 0;
+  while (pos < s0.length) {
+    const hit = findNext(s0, pos);
+    if (!hit) break;
+    const { idx, t } = hit;
+    pos = idx + t.length;
+
+    const next = findNext(s0, pos);
+    const end = next ? next.idx : s0.length;
+    let val = s0.slice(pos, end);
+    pos = end;
+
+    val = val.trim();
+    if (!val) continue;
+
+    if (t === "=/") {
+      segments.push({ ai: "ISBT_DI", value: val });
+      segments.push({ ai: "ID", value: val, source: "ISBT_DI" });
+    } else if (t === "=,") {
+      segments.push({ ai: "21", value: val, source: "ISBT_SERIAL" });
+      segments.push({ ai: "ISBT_SERIAL", value: val });
+    } else if (t === "=>") {
+      const pj = parseJulianYYYJJJ(val.slice(0, 6));
+      if (!pj.error) {
+        const yymmdd = isoToYYMMDD(pj.iso);
+        if (yymmdd) segments.push({ ai: "17", value: yymmdd, source: "ISBT_EXPIRY" });
+        segments.push({ ai: "ISBT_EXP_ISO", value: pj.iso });
+      } else {
+        meta.additional_checks.push({ code: pj.error, severity: "WARN", message: "Could not parse ISBT expiration date (YYYJJJ)." });
+      }
+    } else if (t === "=}") {
+      const pj = parseJulianYYYJJJ(val.slice(0, 6));
+      if (!pj.error) segments.push({ ai: "ISBT_MFG_ISO", value: pj.iso });
+      else meta.additional_checks.push({ code: pj.error, severity: "WARN", message: "Could not parse ISBT manufacturing date (YYYJJJ)." });
+    } else if (t === "&,1") {
+      segments.push({ ai: "10", value: val, source: "ISBT_LOT" });
+      segments.push({ ai: "ISBT_LOT", value: val });
+    } else if (t === "=") {
+      // Donation ID Number: 15 chars; first 13 are DIN (last 2 are flags) per ICCBBA UDI examples.
+      const din = val.length >= 13 ? val.slice(0, 13) : val;
+      segments.push({ ai: "ISBT_DIN", value: din });
+      segments.push({ ai: "ID", value: din, source: "ISBT_DIN" });
+    }
+  }
+
+  if (!segments.length) return null;
+  return { segments, meta };
+}
+
+function parseNonGs1(norm, raw_string, context) {
+  const meta = {
+    kind: "NON_GS1",
+    symbology_hint: null,
+    additional_checks: [],
+  };
+
+  // Symbology hint from UI context (if provided)
+  const hint = context && (context.barcode_format || context.format || context.symbology);
+  if (hint) meta.symbology_hint = String(hint);
+
+  // Try to infer from raw symbology identifiers
+  const raw = String(raw_string || "");
+  const sym = /^\]([A-Za-z0-9]{2})/.exec(raw)?.[1] || null;
+  if (sym) meta.symbology_hint = meta.symbology_hint || `]${sym}`;
+
+  // URLs (common in QR)
+  if (/^https?:\/\//i.test(norm)) {
+    meta.kind = "URI";
+    meta.additional_checks.push({ code: "NON_PRODUCT_PAYLOAD_URI", severity: "WARN", message: "Scanned payload is a URL (QR). Not a GS1 product identifier." });
+    return { segments: [{ ai: "URI", value: norm }], meta };
+  }
+
+  // JSON (common in QR)
+  if ((norm.startsWith("{") && norm.endsWith("}")) || (norm.startsWith("[") && norm.endsWith("]"))) {
+    try {
+      const obj = JSON.parse(norm);
+      meta.kind = "JSON";
+      meta.additional_checks.push({ code: "NON_PRODUCT_PAYLOAD_JSON", severity: "WARN", message: "Scanned payload is JSON (QR). Not a GS1 product identifier." });
+      return { segments: [{ ai: "JSON", value: norm }], meta: { ...meta, json_preview: Array.isArray(obj) ? "array" : "object" } };
+    } catch {
+      // fall through
+    }
+  }
+
+  // Pure numeric famous types (EAN/UPC/GTIN/SSCC)
+  const nk = guessNumericKind(norm);
+  if (nk) {
+    if (nk === "SSCC18") {
+      meta.kind = "SSCC";
+      const segs = [{ ai: "00", value: norm, source: nk }];
+      // validate mod10
+      if (!isValidMod10(norm)) {
+        meta.additional_checks.push({ code: "SSCC_CHECKDIGIT_INVALID", severity: "BLOCK", message: "Invalid SSCC check digit (Mod10)." });
+      }
+      return { segments: segs, meta };
+    }
+    // GTIN family
+    meta.kind = "GTIN";
+    const gtin14 = gtinTo14(norm);
+    const segs = [{ ai: "01", value: gtin14, source: nk }];
+    // validate mod10 (GTIN check digit) using existing validator
+    if (!isValidGtin14(gtin14)) {
+      meta.additional_checks.push({ code: "GTIN_CHECKDIGIT_INVALID", severity: "BLOCK", message: "Invalid GTIN check digit (Mod10).", details: { gtin14, source: nk } });
+    }
+    return { segments: segs, meta };
+  }
+
+  // ICCBBA / ISBT-128 (healthcare) – UDI compound messages (best-effort)
+  const isbt = parseIsbt128(norm);
+  if (isbt) {
+    const baseChecks = Array.isArray(meta.additional_checks) ? meta.additional_checks : [];
+    const extraChecks = Array.isArray(isbt.meta?.additional_checks) ? isbt.meta.additional_checks : [];
+    return { segments: isbt.segments, meta: { ...meta, ...isbt.meta, additional_checks: [...baseChecks, ...extraChecks] } };
+  }
+
+  // HIBC (healthcare) – LIC primary + common secondary formats (best-effort)
+  if (norm.startsWith("+")) {
+    const hibc = parseHibc(norm);
+    if (hibc) {
+      const baseChecks = Array.isArray(meta.additional_checks) ? meta.additional_checks : [];
+      const extraChecks = Array.isArray(hibc.meta?.additional_checks) ? hibc.meta.additional_checks : [];
+      return { segments: hibc.segments, meta: { ...meta, ...hibc.meta, additional_checks: [...baseChecks, ...extraChecks] } };
+    }
+  }
+
+
+  // Default: treat as internal / custom identifier (Code128/Code39/ITF/PDF417/Aztec/etc.)
+  meta.kind = "ID";
+  meta.additional_checks.push({ code: "NON_GS1_ID", severity: "WARN", message: "Non-GS1 barcode payload. Stored as an opaque identifier." });
+  return { segments: [{ ai: "ID", value: norm }], meta };
+}
+
+export function parseBarcode(raw_string, policy, context) {
+  const normalized = normalizeInput(raw_string);
+
+  // Strong GS1 hints: ASCII GS separator OR symbology identifiers (]C1, ]d2, ]Q3)
+  const raw = String(raw_string || "");
+  const sym = /^\]([A-Za-z0-9]{2})/.exec(raw)?.[1] || "";
+  const symUpper = sym.toUpperCase();
+  const strongGs1 = normalized.includes(GS) || ["C1", "D2", "Q3"].includes(symUpper);
+
+  // Also treat strings starting with known AIs as GS1 (with or without separators)
+  const startsLikeAI = !!tryMatchAI(normalized, 0);
+
+  if (strongGs1 || startsLikeAI) {
+    const gs1 = parseGs1(normalized, policy?.missing_gs_behavior || "BLOCK");
+    // attach symbology hint if present
+    if (sym) gs1.meta.symbology_hint = `]${sym}`;
+    if (context && (context.barcode_format || context.format)) gs1.meta.symbology_hint = gs1.meta.symbology_hint || String(context.barcode_format || context.format);
+    return { normalized, ...gs1 };
+  }
+
+  const non = parseNonGs1(normalized, raw_string, context);
+  return { normalized, segments: non.segments, meta: non.meta };
 }
 
 export function decide(parsedResult, policy) {
   const checks = [];
   const parsed = Array.isArray(parsedResult) ? parsedResult : parsedResult?.segments || [];
   const meta = Array.isArray(parsedResult) ? {} : (parsedResult?.meta || {});
+
+  // Extra checks produced by the multi-parser (e.g., URL/JSON/HIBC/non-GS1 hints)
+  const preChecks = Array.isArray(meta?.additional_checks) ? meta.additional_checks : [];
+  for (const c of preChecks) checks.push(c);
 
   const map = {};
   for (const p of parsed) {
@@ -520,8 +969,38 @@ export function decide(parsedResult, policy) {
     });
   }
 
-  // Required AI checks
-  if (!map["01"]) checks.push({ code: "REQ_AI_01_MISSING", severity: "BLOCK", message: "Missing GTIN (AI 01)." });
+  // Required primary identifier checks (famous/typical barcode families)
+  // Default behavior: require GTIN (AI 01), but allow SSCC-only workflows via policy.
+  const requireGtin = policy?.require_gtin !== false;           // default true
+  const allowSsccOnly = policy?.allow_sscc_only !== false;      // default true
+
+  const hasHibc = !!map["HIBC_PRIMARY"] || !!map["HIBC_LIC"] || !!map["HIBC"];
+  const hasIsbt = !!map["ISBT_DI"] || !!map["ISBT_DIN"];
+  const allowHibcNoGtin = policy?.allow_hibc_without_gtin !== false; // default true
+  const allowIsbtNoGtin = policy?.allow_isbt_without_gtin !== false; // default true
+
+  if (requireGtin && !map["01"]) {
+    if (allowSsccOnly && map["00"]) {
+      checks.push({ code: "SSCC_ONLY", severity: "WARN", message: "SSCC (AI 00) detected without GTIN (AI 01)." });
+    } else if (hasHibc && allowHibcNoGtin) {
+      checks.push({ code: "HIBC_NO_GTIN", severity: "WARN", message: "HIBC detected without GTIN (AI 01). Allowed by policy." });
+    } else if (hasIsbt && allowIsbtNoGtin) {
+      checks.push({ code: "ISBT_NO_GTIN", severity: "WARN", message: "ISBT-128 (ICCBBA) detected without GTIN (AI 01). Allowed by policy." });
+    } else {
+      checks.push({ code: "REQ_AI_01_MISSING", severity: "BLOCK", message: "Missing GTIN (AI 01)." });
+    }
+  }
+
+  // SSCC check digit (Mod10) when present
+  if (map["00"] && policy?.enforce_sscc_checkdigit !== false) {
+    if (!isValidMod10(map["00"])) {
+      // Avoid duplication if the parser already added it
+      const exists = checks.some((c) => c.code === "SSCC_CHECKDIGIT_INVALID");
+      if (!exists) checks.push({ code: "SSCC_CHECKDIGIT_INVALID", severity: "BLOCK", message: "Invalid SSCC check digit (Mod10)." });
+    }
+  }
+
+  // GTIN check digit
 
   // GTIN check digit
   if (policy.enforce_gtin_checkdigit !== false && map["01"]) {
@@ -606,6 +1085,69 @@ async function getActivePolicy() {
     };
   }
   return r.rows[0].config;
+}
+
+
+async function resolveItemFromSegments(segments) {
+  try {
+    const segs = Array.isArray(segments) ? segments : [];
+    const map = {};
+    for (const s of segs) {
+      if (s && s.ai && s.value != null) map[s.ai] = s.value;
+    }
+
+    // 1) GTIN -> item_no via gtin_map
+    const gtin = map["01"] ? gtinTo14(map["01"]) : null;
+    if (gtin) {
+      const r = await q("SELECT item_no FROM gtin_map WHERE gtin=$1 LIMIT 1", [gtin]);
+      if (r.rows.length) {
+        const item_no = r.rows[0].item_no;
+        const it = await q(
+          "SELECT item_no, item_name, is_top200, primary_barcode, barcode_type, alt_barcodes FROM items_cache WHERE item_no=$1 LIMIT 1",
+          [item_no]
+        );
+        return { item_no, item: it.rows[0] || { item_no }, matched_on: "GTIN_MAP", matched_value: gtin };
+      }
+    }
+
+    // 2) Alternate IDs (HIBC / ISBT / generic ID) -> items_cache
+    const candidates = [];
+    const push = (v, kind) => {
+      const x = String(v || "").trim();
+      if (!x) return;
+      const u = x.toUpperCase();
+      if (!candidates.some((c) => c.value === u)) candidates.push({ value: u, kind });
+    };
+    push(map["HIBC_PRIMARY"], "HIBC_PRIMARY");
+    push(map["ISBT_DI"], "ISBT_DI");
+    push(map["ISBT_DIN"], "ISBT_DIN");
+    push(map["ID"], "ID");
+
+    for (const c of candidates) {
+      const r = await q(
+        `SELECT item_no, item_name, is_top200, primary_barcode, barcode_type, alt_barcodes
+         FROM items_cache
+         WHERE UPPER(item_no)=UPPER($1)
+            OR UPPER(primary_barcode)=UPPER($1)
+            OR $1 = ANY(COALESCE(alt_barcodes, ARRAY[]::text[]))
+         LIMIT 1`,
+        [c.value]
+      );
+      if (r.rows.length) {
+        const row = r.rows[0];
+        let matched_on = "ITEMS_CACHE";
+        if ((row.item_no || "").toUpperCase() === c.value) matched_on = "ITEM_NO";
+        else if ((row.primary_barcode || "").toUpperCase() === c.value) matched_on = "PRIMARY_BARCODE";
+        else matched_on = "ALT_BARCODE";
+        return { item_no: row.item_no, item: row, matched_on, matched_value: c.value, id_kind: c.kind };
+      }
+    }
+
+    return null;
+  } catch (e) {
+    console.warn("[WARN] resolveItemFromSegments failed:", e?.message || e);
+    return null;
+  }
 }
 
 // ---------------- Idempotency ----------------
@@ -1009,17 +1551,19 @@ app.post("/api/scans/parse-validate", parseRateLimit, auth, requireRole("operato
     }
 
     const policy = await getActivePolicy();
-    const normalized = normalizeInput(raw_string);
-    const parsedResult = parseGs1(normalized, policy.missing_gs_behavior || "BLOCK");
-    const { decision, checks, meta } = decide(parsedResult, policy);
+    const parsedBundle = parseBarcode(raw_string, policy, context);
+    const normalized = parsedBundle.normalized;
+    const { decision, checks, meta } = decide(parsedBundle, policy);
+    const resolved_item = await resolveItemFromSegments(parsedBundle.segments);
 
     const resp = {
       scan_id,
       decision,
       normalized,
-      parsed: parsedResult.segments,
+      parsed: parsedBundle.segments,
       parse_meta: meta,
       checks,
+      resolved_item,
       policy_applied: policy,
     };
 
@@ -1036,7 +1580,7 @@ app.post("/api/scans/parse-validate", parseRateLimit, auth, requireRole("operato
         parsed=EXCLUDED.parsed,
         context=EXCLUDED.context
     `,
-      [scanRowId, scan_id, raw_string, normalized, decision, checks, parsedResult.segments, context]
+      [scanRowId, scan_id, raw_string, normalized, decision, checks, parsedBundle.segments, context]
     );
 
     await putIdemRecord({ key: idem, request_hash, response: resp });
@@ -1599,6 +2143,60 @@ app.post("/api/gtin-map/upsert", auth, requireRole("admin"), async (req, res) =>
     }
   });
 
+
+// POST /api/items-cache/map-barcode - Map any scanned ID (Code128/Code39/HIBC/ISBT/etc.) to an item_no (admin)
+// Body: { item_no, primary_barcode, barcode_type?, alt_barcodes?: string[]|string, item_name? }
+app.post('/api/items-cache/map-barcode', auth, requireRole('admin'), async (req, res) => {
+  try {
+    const { item_no, primary_barcode, barcode_type, alt_barcodes, item_name } = req.body || {};
+    if (!item_no || !primary_barcode) {
+      return res.status(400).json({ ok: false, error: 'MISSING_ITEM_NO_OR_BARCODE' });
+    }
+
+    const itemNo = String(item_no).trim();
+    const primary = String(primary_barcode).trim().toUpperCase();
+    const type = barcode_type ? String(barcode_type).trim().toUpperCase() : null;
+
+    let alts = [];
+    if (Array.isArray(alt_barcodes)) alts = alt_barcodes.map((x) => String(x).trim().toUpperCase()).filter(Boolean);
+    else if (typeof alt_barcodes === 'string' && alt_barcodes.trim()) alts = alt_barcodes.split(/[\n,;]+/).map((x) => x.trim().toUpperCase()).filter(Boolean);
+
+    // Avoid duplicating primary into alts
+    alts = alts.filter((x) => x !== primary);
+
+    // Merge with existing
+    const existing = await q('SELECT alt_barcodes FROM public.items_cache WHERE item_no=$1 LIMIT 1', [itemNo]);
+    const current = existing.rows[0]?.alt_barcodes || [];
+    const merged = Array.from(new Set([...(current || []).map((x) => String(x).toUpperCase()), ...alts]));
+
+    const r = await q(
+      `INSERT INTO public.items_cache (item_no, item_name, is_top200, primary_barcode, barcode_type, alt_barcodes, updated_at)
+       VALUES ($1, $2, false, $3, $4, $5, NOW())
+       ON CONFLICT (item_no) DO UPDATE SET
+         item_name = COALESCE(EXCLUDED.item_name, public.items_cache.item_name),
+         primary_barcode = EXCLUDED.primary_barcode,
+         barcode_type = COALESCE(EXCLUDED.barcode_type, public.items_cache.barcode_type),
+         alt_barcodes = EXCLUDED.alt_barcodes,
+         updated_at = NOW()
+       RETURNING item_no, item_name, primary_barcode, barcode_type, alt_barcodes`,
+      [itemNo, item_name ? String(item_name).trim() : null, primary, type, merged]
+    );
+
+    await audit({
+      actor: { username: req.user.username, role: req.user.role },
+      event_type: 'ITEM_BARCODE_MAPPED',
+      entity_type: 'ITEM',
+      entity_id: itemNo,
+      payload: { primary_barcode: primary, barcode_type: type, alt_barcodes_added: alts }
+    });
+
+    res.json({ ok: true, item: r.rows[0] });
+  } catch (e) {
+    console.error('items-cache/map-barcode error:', e);
+    res.status(500).json({ ok: false, error: 'INTERNAL_ERROR' });
+  }
+});
+
   // POST /api/items-cache/sync - Sync from BC (admin only, placeholder)
   app.post('/api/items-cache/sync', auth, requireRole('admin'), async (req, res) => {
     try {
@@ -2154,15 +2752,43 @@ function uiParsedFromSegments(segments, raw) {
     if (s && s.ai && s.ai !== "??") ai[s.ai] = s.value;
   }
   const out = { ai, raw: String(raw || "") };
+
+  // Common GS1 fields
+  if (ai["00"]) out.sscc = ai["00"];
   if (ai["01"]) out.gtin = ai["01"];
+  if (ai["02"]) out.content_gtin = ai["02"];
   if (ai["10"]) out.lot = ai["10"];
+  if (ai["11"]) out.prod_date = ai["11"];
+  if (ai["12"]) out.due_date = ai["12"];
+  if (ai["13"]) out.pack_date = ai["13"];
+  if (ai["15"]) out.best_before = ai["15"];
   if (ai["17"]) out.expiry = ai["17"];
   if (ai["21"]) out.serial = ai["21"];
   if (ai["30"] || ai["37"]) out.qty = ai["30"] || ai["37"];
+  if (ai["240"]) out.additional_id = ai["240"];
+  if (ai["241"]) out.customer_part = ai["241"];
+  if (ai["400"]) out.order_no = ai["400"];
+  if (ai["414"]) out.location_gln = ai["414"];
+
+  // Non-GS1 payload helpers (QR / custom codes)
+  if (ai["URI"]) out.uri = ai["URI"];
+  if (ai["JSON"]) out.json = ai["JSON"];
+  if (ai["HIBC_PRIMARY"]) out.hibc = ai["HIBC_PRIMARY"];
+  else if (ai["HIBC"]) out.hibc = ai["HIBC"];
+  if (ai["ISBT_DI"]) out.isbt_di = ai["ISBT_DI"];
+  if (ai["ISBT_DIN"]) out.isbt_din = ai["ISBT_DIN"];
+  if (ai["ID"]) out.id = ai["ID"];
+
+  // Derived dates
   if (out.expiry && /^\d{6}$/.test(out.expiry)) {
     const pe = parseExpiryYYMMDD(out.expiry);
     if (!pe.error) out.expiry_iso = pe.iso;
   }
+  if (out.best_before && /^\d{6}$/.test(out.best_before)) {
+    const pe = parseExpiryYYMMDD(out.best_before);
+    if (!pe.error) out.best_before_iso = pe.iso;
+  }
+
   return out;
 }
 
@@ -2181,16 +2807,17 @@ app.post("/api/parse-validate", auth, requireRole("operator", "admin", "auditor"
     });
   }
 
-  const normalized = normalizeInput(raw);
-  const parsedResult = parseGs1(normalized, NO_BLOCK ? "LOOKAHEAD" : (policy.missing_gs_behavior || "BLOCK"));
-  const d = decide(parsedResult, policy);
+  const parsedBundle = parseBarcode(raw, policy, { template: "LEGACY_UI" });
+  const d = decide(parsedBundle, policy);
+  const resolved_item = await resolveItemFromSegments(parsedBundle.segments);
 
   res.json({
     decision: d.decision,
-    normalized,
-    parsed: uiParsedFromSegments(parsedResult.segments, raw),
+    normalized: parsedBundle.normalized,
+    parsed: uiParsedFromSegments(parsedBundle.segments, raw),
     parse_meta: d.meta,
     checks: d.checks,
+    resolved_item,
     policy_applied: policy,
   });
 });
@@ -2208,12 +2835,11 @@ app.post("/api/parse", auth, requireRole("operator", "admin", "auditor"), async 
       policy_applied: policy,
     });
   }
-  const normalized = normalizeInput(raw);
-  const parsedResult = parseGs1(normalized, NO_BLOCK ? "LOOKAHEAD" : (policy.missing_gs_behavior || "BLOCK"));
+  const parsedBundle = parseBarcode(raw, policy, { template: "LEGACY_UI" });
   return res.json({
-    normalized,
-    parsed: uiParsedFromSegments(parsedResult.segments, raw),
-    parse_meta: parsedResult.meta || {},
+    normalized: parsedBundle.normalized,
+    parsed: uiParsedFromSegments(parsedBundle.segments, raw),
+    parse_meta: parsedBundle.meta || {},
     policy_applied: policy,
   });
 });
@@ -2230,12 +2856,11 @@ app.post("/api/validate", auth, requireRole("operator", "admin", "auditor"), asy
       policy_applied: policy,
     });
   }
-  const normalized = normalizeInput(raw);
-  const parsedResult = parseGs1(normalized, NO_BLOCK ? "LOOKAHEAD" : (policy.missing_gs_behavior || "BLOCK"));
-  const d = decide(parsedResult, policy);
+  const parsedBundle = parseBarcode(raw, policy, { template: "LEGACY_UI" });
+  const d = decide(parsedBundle, policy);
   return res.json({
     decision: d.decision,
-    normalized,
+    normalized: parsedBundle.normalized,
     checks: d.checks,
     parse_meta: d.meta,
     policy_applied: policy,
@@ -2263,9 +2888,9 @@ app.post("/api/commit", auth, requireRole("operator", "admin", "auditor"), async
   // Create/Upsert a scan row (so dashboards/audit work)
   const scan_id = `UI-${Date.now()}-${String(Math.floor(Math.random() * 1e6)).padStart(6, "0")}`;
   const policy = await getActivePolicy();
-  const normalized = normalizeInput(raw);
-  const parsedResult = raw ? parseGs1(normalized, NO_BLOCK ? "LOOKAHEAD" : (policy.missing_gs_behavior || "BLOCK")) : { segments: [], meta: {} };
-  const d = decide(parsedResult, policy);
+  const parsedBundle = raw ? parseBarcode(raw, policy, { template, commitType, source: "ui_commit" }) : { normalized: "", segments: [], meta: {} };
+  const normalized = parsedBundle.normalized || "";
+  const d = decide(parsedBundle, policy);
 
   const scanRowId = `SCAN-${scan_id}`;
   const context = { source: "ui_commit", template, client_ts: req.body?.client_ts || nowIso(), commitType };
@@ -2282,7 +2907,7 @@ app.post("/api/commit", auth, requireRole("operator", "admin", "auditor"), async
       parsed=EXCLUDED.parsed,
       context=EXCLUDED.context
   `,
-    [scanRowId, scan_id, raw, normalized, d.decision, d.checks, parsedResult.segments, context]
+    [scanRowId, scan_id, raw, normalized, d.decision, d.checks, parsedBundle.segments, context]
   );
 
   // Simulated BC result (same format as /api/postings/commit)

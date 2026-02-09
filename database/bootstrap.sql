@@ -148,6 +148,13 @@ CREATE TABLE IF NOT EXISTS public.tx_log (
 );
 
 CREATE INDEX IF NOT EXISTS idx_items_cache_top200 ON public.items_cache(is_top200);
+-- Items Cache: barcode mapping (primary + alternate) for non-GS1 IDs (Code128/Code39/HIBC/ISBT/etc.)
+ALTER TABLE public.items_cache ADD COLUMN IF NOT EXISTS primary_barcode text;
+ALTER TABLE public.items_cache ADD COLUMN IF NOT EXISTS barcode_type text;
+ALTER TABLE public.items_cache ADD COLUMN IF NOT EXISTS alt_barcodes text[] NOT NULL DEFAULT ARRAY[]::text[];
+CREATE INDEX IF NOT EXISTS idx_items_cache_primary_barcode ON public.items_cache(primary_barcode);
+CREATE INDEX IF NOT EXISTS idx_items_cache_alt_barcodes_gin ON public.items_cache USING gin (alt_barcodes);
+
 CREATE INDEX IF NOT EXISTS idx_work_sessions_status ON public.work_sessions(status);
 CREATE INDEX IF NOT EXISTS idx_work_lines_session ON public.work_lines(session_id);
 CREATE INDEX IF NOT EXISTS idx_tx_log_created_at ON public.tx_log(created_at);
