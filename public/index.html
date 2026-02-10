@@ -383,6 +383,97 @@
             .scanner-controls { flex-direction: column; align-items: stretch; gap: 8px; }
             .scan-trigger-btn { width: 100%; }
         }
+    
+        /* ===== Responsive FIX: Sidebar scroll + reliable viewport height (mobile portrait/landscape) ===== */
+        @supports (height: 100dvh) {
+            body { height: 100dvh; }
+        }
+
+        /* Allow flex children to scroll properly */
+        .dash-layout, .main-content, .scroll-area, .sidebar { min-height: 0; }
+
+        /* Make the whole sidebar scrollable so scanner + footer never get cut (landscape issue) */
+        .sidebar {
+            height: 100%;
+            overflow-y: auto;
+            overflow-x: hidden;
+            -webkit-overflow-scrolling: touch;
+            overscroll-behavior: contain;
+            padding-bottom: calc(16px + env(safe-area-inset-bottom, 0px));
+        }
+
+        /* ===== Mobile Scan Dock: SCAN always available when sidebar is hidden (portrait issue) ===== */
+        .mobile-scan-dock{
+            position: fixed;
+            left: 16px;
+            right: 16px;
+            bottom: calc(16px + env(safe-area-inset-bottom, 0px));
+            z-index: 9999;
+            display: none;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+            padding: 12px 12px;
+            border-radius: 18px;
+            background: rgba(255,255,255,0.72);
+            border: 1px solid rgba(255,255,255,0.55);
+            box-shadow: 0 12px 30px rgba(0,0,0,0.12);
+            backdrop-filter: blur(14px);
+            -webkit-backdrop-filter: blur(14px);
+        }
+        .msd-left{ display:flex; flex-direction:column; gap:4px; min-width: 120px; }
+        .msd-status-label{ font-size: 11px; letter-spacing: .12em; opacity: .7; }
+        .msd-status{
+            font-size: 12px;
+            font-weight: 800;
+            padding: 6px 10px;
+            border-radius: 999px;
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            width: fit-content;
+            background: rgba(20,20,20,0.06);
+        }
+        .msd-scan-btn{
+            flex: 0 0 auto;
+            display: inline-flex;
+            align-items: center;
+            gap: 10px;
+            padding: 12px 14px;
+            border-radius: 14px;
+            border: 0;
+            cursor: pointer;
+            font-weight: 900;
+            letter-spacing: .08em;
+            text-transform: uppercase;
+            background: rgba(30, 122, 255, 0.92);
+            color: white;
+            box-shadow: 0 10px 22px rgba(30,122,255,0.28);
+        }
+        .msd-scan-btn:active{ transform: translateY(1px); }
+        .msd-scan-icon{
+            width: 34px;
+            height: 34px;
+            border-radius: 10px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            background: rgba(255,255,255,0.18);
+            font-size: 16px;
+        }
+
+        @media (max-width: 900px){
+            .mobile-scan-dock{ display: flex; }
+            /* ensure content isn't hidden behind the dock */
+            .scroll-area{ padding-bottom: 140px !important; }
+        }
+
+        html[data-theme="dark"] .mobile-scan-dock{
+            background: rgba(18,18,20,0.66);
+            border-color: rgba(255,255,255,0.12);
+        }
+        html[data-theme="dark"] .msd-status{ background: rgba(255,255,255,0.10); }
+
     </style>
 </head>
 <body>
@@ -988,5 +1079,56 @@
             }
         });
     </script>
+
+    <!-- === Mobile Scan Dock (always available on small screens) === -->
+    <div id="mobileScanDock" class="mobile-scan-dock" role="region" aria-label="Scanner">
+        <div class="msd-left">
+            <div class="msd-status-label">STATUS</div>
+            <div id="mobileScanStatus" class="msd-status">STANDBY</div>
+        </div>
+        <button id="mobileScanBtn" class="msd-scan-btn" type="button">
+            <span class="msd-scan-icon">⌁</span>
+            <span>SCAN</span>
+        </button>
+    </div>
+
+
+<script>
+(function () {
+  function qs(sel){ return document.querySelector(sel); }
+
+  function triggerScan(){
+    if (typeof window.triggerScan === 'function') return window.triggerScan();
+
+    // fallback: click the desktop scan button if present
+    var btn = document.querySelector('.scan-trigger-btn');
+    if (btn && typeof btn.click === 'function') return btn.click();
+
+    console.warn('[MobileScanDock] No scan trigger found.');
+  }
+
+  function syncStatus(){
+    var src = qs('#scannerStatus');
+    var dst = qs('#mobileScanStatus');
+    if (!src || !dst) return;
+
+    var update = function(){
+      var t = (src.textContent || '').trim();
+      if (t) dst.textContent = t;
+    };
+    update();
+
+    var obs = new MutationObserver(update);
+    obs.observe(src, { childList:true, subtree:true, characterData:true, attributes:true });
+  }
+
+  document.addEventListener('DOMContentLoaded', function(){
+    var b = qs('#mobileScanBtn');
+    if (b) b.addEventListener('click', triggerScan);
+    syncStatus();
+  });
+})();
+</script>
+
 </body>
 </html>
