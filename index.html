@@ -1,0 +1,1048 @@
+<!DOCTYPE html>
+<html lang="en" dir="ltr" data-theme="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>ATH Medical — Ultimate Warehouse Hub</title>
+
+    <!-- Fonts: Cairo (Arabic) + Plus Jakarta Sans (English) + JetBrains Mono (Data) -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;500;700;900&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500;700&display=swap" rel="stylesheet">
+    
+    <!-- Icons: Phosphor -->
+    <script src="https://unpkg.com/@phosphor-icons/web"></script>
+
+    <style>
+        :root {
+            /* === CORE PALETTE === */
+            --brand-primary: #3b82f6;      /* ATH Blue */
+            --brand-secondary: #6366f1;    /* Indigo */
+            --brand-glow: rgba(59, 130, 246, 0.5);
+            
+            --tactical-red: #ef4444;       /* Scanner/Alert */
+            --tactical-green: #10b981;     /* Success */
+            --tactical-amber: #f59e0b;     /* Warning */
+
+            /* === LIGHT THEME TOKENS === */
+            --bg-deep: #f0f4f8;
+            --text-main: #0f172a;
+            --text-muted: #64748b;
+            --glass-surface: rgba(255, 255, 255, 0.65);
+            --glass-surface-hover: rgba(255, 255, 255, 0.85);
+            --glass-border: rgba(255, 255, 255, 0.6);
+            --glass-shadow: 0 10px 40px -10px rgba(148, 163, 184, 0.2);
+            --grid-color: rgba(0, 0, 0, 0.03);
+            --scanner-bg: rgba(255, 255, 255, 0.5);
+
+            /* === DIMENSIONS & ANIMATION === */
+            --sidebar-w: 280px;
+            --radius-xl: 24px;
+            --radius-lg: 16px;
+            --ease-elastic: cubic-bezier(0.34, 1.56, 0.64, 1);
+        }
+
+        /* === DARK THEME === */
+        [data-theme="dark"] {
+            --bg-deep: #020617; /* Slate 950 */
+            --text-main: #f8fafc;
+            --text-muted: #94a3b8;
+            --glass-surface: rgba(15, 23, 42, 0.60);
+            --glass-surface-hover: rgba(30, 41, 59, 0.75);
+            --glass-border: rgba(255, 255, 255, 0.08);
+            --glass-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
+            --grid-color: rgba(255, 255, 255, 0.03);
+            --scanner-bg: rgba(0, 0, 0, 0.3);
+        }
+
+        /* === TACTICAL MODE (Cyberpunk High Contrast) === */
+        [data-theme="tactical"] {
+            --bg-deep: #000000;
+            --text-main: #e0e0e0;
+            --text-muted: #6b7280;
+            --brand-primary: #00f0ff;      /* Neon Cyan */
+            --brand-secondary: #0099cc;
+            --glass-surface: rgba(5, 5, 5, 0.85);
+            --glass-border: #333;
+            --glass-shadow: 0 0 20px rgba(0, 240, 255, 0.15);
+            --grid-color: rgba(0, 240, 255, 0.1);
+            --scanner-bg: rgba(0, 0, 0, 0.8);
+        }
+
+        * { box-sizing: border-box; outline: none; -webkit-tap-highlight-color: transparent; }
+        
+        body {
+            margin: 0;
+            /* Use a programming-style monospace font throughout the app for a modern, technical feel */
+            font-family: 'JetBrains Mono', monospace;
+            background-color: var(--bg-deep);
+            color: var(--text-main);
+            height: 100vh;
+            overflow: hidden;
+            transition: background-color 0.4s ease, color 0.4s ease;
+        }
+        /* When rendering Arabic text we still fall back to Cairo for better glyph support */
+        :lang(ar) { font-family: 'JetBrains Mono', monospace; }
+
+        /* === AMBIENT ENVIRONMENT === */
+        .ambient-layer { position: fixed; inset: 0; z-index: 0; overflow: hidden; pointer-events: none; }
+        
+        .blob {
+            position: absolute; border-radius: 50%; filter: blur(80px); opacity: 0.4;
+            animation: float 20s infinite ease-in-out alternate;
+        }
+        .blob-1 { top: -10%; left: -10%; width: 50vw; height: 50vw; background: var(--brand-primary); }
+        .blob-2 { bottom: -10%; right: -10%; width: 50vw; height: 50vw; background: var(--brand-secondary); animation-delay: -5s; }
+        .blob-3 { top: 40%; left: 30%; width: 40vw; height: 40vw; background: #8b5cf6; animation-delay: -10s; opacity: 0.2; }
+        
+        .grid-overlay {
+            position: absolute; inset: 0;
+            background-image: linear-gradient(var(--grid-color) 1px, transparent 1px),
+                              linear-gradient(90deg, var(--grid-color) 1px, transparent 1px);
+            background-size: 40px 40px;
+            mask-image: radial-gradient(circle at center, black 40%, transparent 90%);
+        }
+        .noise-overlay {
+            position: absolute; inset: 0; opacity: 0.05; pointer-events: none;
+            background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.65' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)' opacity='1'/%3E%3C/svg%3E");
+        }
+
+        @keyframes float { 0% { transform: translate(0, 0) scale(1); } 100% { transform: translate(40px, 20px) scale(1.05); } }
+
+        /* === GLASS COMPONENTS === */
+        .glass-panel {
+            background: var(--glass-surface);
+            backdrop-filter: blur(24px); -webkit-backdrop-filter: blur(24px);
+            border: 1px solid var(--glass-border);
+            box-shadow: var(--glass-shadow);
+            transition: all 0.4s var(--ease-elastic);
+        }
+        
+        .glass-panel-hover:hover {
+            transform: translateY(-4px) scale(1.01);
+            border-color: var(--brand-primary);
+            box-shadow: 0 20px 40px -10px var(--brand-glow);
+        }
+
+        /* === LAYOUT === */
+        #app { position: relative; z-index: 10; height: 100%; width: 100%; display: flex; flex-direction: column; }
+
+        .view-section {
+            position: absolute; inset: 0; opacity: 0; pointer-events: none;
+            transform: scale(0.96) translateY(10px); filter: blur(4px);
+            transition: all 0.6s var(--ease-elastic);
+            display: flex; flex-direction: column;
+        }
+        .view-section.active { opacity: 1; pointer-events: auto; transform: scale(1) translateY(0); filter: blur(0); }
+
+        /* === LOGIN VIEW === */
+        .login-wrapper { display: flex; align-items: center; justify-content: center; height: 100%; padding: 20px; }
+        .login-card { width: 100%; max-width: 420px; padding: 40px; border-radius: var(--radius-xl); position: relative; overflow: hidden; }
+        
+        .brand-icon-lg {
+            width: 80px; height: 80px; margin: 0 auto 20px;
+            background: linear-gradient(135deg, var(--brand-primary), var(--brand-secondary));
+            border-radius: 20px; display: grid; place-items: center; font-size: 40px; color: white;
+            box-shadow: 0 20px 50px var(--brand-glow);
+            animation: pulse-glow 3s infinite;
+        }
+        @keyframes pulse-glow { 0%,100% { box-shadow: 0 20px 50px var(--brand-glow); } 50% { box-shadow: 0 20px 70px var(--brand-glow); } }
+
+        .form-input {
+            width: 100%; padding: 16px 16px 16px 48px; margin-bottom: 16px;
+            background: rgba(255,255,255,0.05); border: 1px solid var(--glass-border);
+            border-radius: var(--radius-lg); color: var(--text-main); font-size: 15px;
+            font-family: inherit; transition: 0.3s;
+        }
+        .form-input:focus { background: var(--glass-surface); border-color: var(--brand-primary); box-shadow: 0 0 0 4px var(--brand-glow); }
+
+        .btn-primary {
+            width: 100%; padding: 16px; border-radius: var(--radius-lg); border: none;
+            background: linear-gradient(135deg, var(--brand-primary), var(--brand-secondary));
+            color: white; font-weight: 700; cursor: pointer;
+            box-shadow: 0 10px 30px var(--brand-glow);
+            transition: 0.3s; display: flex; align-items: center; justify-content: center; gap: 8px;
+        }
+        .btn-primary:hover { transform: translateY(-2px); box-shadow: 0 15px 40px var(--brand-glow); }
+
+        /* === DASHBOARD LAYOUT === */
+        .dash-layout { display: flex; height: 100%; }
+        
+        .sidebar {
+            width: var(--sidebar-w); border-inline-end: 1px solid var(--glass-border);
+            padding: 24px 16px; display: flex; flex-direction: column; gap: 8px; z-index: 50;
+        }
+        
+        .nav-item {
+            display: flex; align-items: center; gap: 12px; padding: 14px 16px;
+            border-radius: var(--radius-lg); color: var(--text-muted); font-weight: 600;
+            cursor: pointer; transition: 0.2s; position: relative; overflow: hidden;
+        }
+        .nav-item:hover { background: rgba(255,255,255,0.05); color: var(--text-main); }
+        .nav-item.active {
+            background: linear-gradient(90deg, rgba(59,130,246,0.1), transparent);
+            color: var(--brand-primary);
+        }
+        .nav-item.active::before {
+            content: ''; position: absolute; left: 0; top: 15%; height: 70%; width: 4px;
+            background: var(--brand-primary); border-radius: 0 4px 4px 0;
+        }
+
+        /* === SIDEBAR SCANNER WIDGET === */
+        .sidebar-scanner {
+            margin-top: auto;
+            margin-bottom: 12px;
+            border-radius: var(--radius-lg);
+            background: var(--scanner-bg);
+            border: 1px solid var(--glass-border);
+            overflow: hidden;
+            display: flex; flex-direction: column;
+            transition: all 0.3s;
+        }
+        
+        .scanner-viewport {
+            height: 140px;
+            background: #000;
+            position: relative;
+            overflow: hidden;
+            display: flex; align-items: center; justify-content: center;
+        }
+
+        .camera-feed-sim {
+            position: absolute; inset: 0; opacity: 0.3;
+            background: repeating-linear-gradient(45deg, #111 0px, #111 10px, #222 10px, #222 20px);
+        }
+
+        .laser-line {
+            position: absolute; left: 0; right: 0; height: 2px;
+            background: var(--brand-primary);
+            box-shadow: 0 0 20px var(--brand-primary);
+            top: 0%;
+            animation: laser-sweep 2s linear infinite; /* ALWAYS MOVING */
+            z-index: 2;
+        }
+
+        .scanner-overlay-ui {
+            position: absolute; inset: 0; pointer-events: none; z-index: 3;
+            border: 2px solid transparent;
+            transition: 0.3s;
+        }
+
+        .scanner-overlay-ui::before, .scanner-overlay-ui::after {
+            content: ''; position: absolute; width: 15px; height: 15px;
+            border: 2px solid var(--glass-border); transition: 0.3s;
+        }
+        .scanner-overlay-ui::before { top: 8px; left: 8px; border-right: none; border-bottom: none; }
+        .scanner-overlay-ui::after { bottom: 8px; right: 8px; border-left: none; border-top: none; }
+
+        .sidebar-scanner.active {
+            border-color: var(--tactical-red);
+            box-shadow: 0 0 20px rgba(239, 68, 68, 0.15);
+        }
+        .sidebar-scanner.active .laser-line {
+            background: var(--tactical-red);
+            box-shadow: 0 0 25px var(--tactical-red);
+            animation-duration: 0.8s;
+        }
+        .sidebar-scanner.active .scanner-overlay-ui::before, 
+        .sidebar-scanner.active .scanner-overlay-ui::after {
+            border-color: var(--tactical-red);
+        }
+
+        .scanner-controls {
+            padding: 10px 12px;
+            display: flex; align-items: center; justify-content: space-between;
+            border-top: 1px solid var(--glass-border);
+            gap: 8px;
+        }
+
+        .scan-trigger-btn {
+            padding: 8px 12px; border-radius: 8px; border: none;
+            background: var(--glass-border); color: var(--text-main); font-weight: 700; font-size: 12px;
+            cursor: pointer; transition: 0.2s; display: flex; align-items: center; justify-content: center; gap: 6px;
+        }
+        .scan-trigger-btn:hover { background: var(--brand-primary); color: white; }
+
+        /* === MOBILE SCAN DOCK (shown when sidebar is hidden) === */
+        .mobile-scan-dock{
+            display:none;
+            align-items:center;
+            justify-content:space-between;
+            gap:12px;
+            padding: 12px 14px;
+            border-radius: var(--radius-xl);
+            border: 1px solid var(--glass-border);
+        }
+        .mobile-scan-dock.active{
+            border-color: var(--tactical-red);
+            box-shadow: 0 0 20px rgba(239, 68, 68, 0.15);
+        }
+        .scan-trigger-btn--mobile{
+            padding: 12px 16px;
+            border-radius: 12px;
+            font-size: 13px;
+            white-space: nowrap;
+        }
+        
+        @keyframes laser-sweep {
+            0% { top: 5%; opacity: 0; }
+            10% { opacity: 1; }
+            90% { opacity: 1; }
+            100% { top: 95%; opacity: 0; }
+        }
+
+        /* === MAIN CONTENT === */
+        .main-content { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+        
+        .topbar {
+            height: 80px; padding: 0 32px; display: flex; align-items: center; justify-content: space-between;
+        }
+        .search-pill {
+            display: flex; align-items: center; gap: 10px; padding: 10px 20px; width: 320px;
+            background: var(--glass-surface); border: 1px solid var(--glass-border); border-radius: 99px;
+            color: var(--text-muted); font-size: 14px; transition: 0.3s;
+        }
+        .search-pill:focus-within { width: 360px; border-color: var(--brand-primary); box-shadow: 0 0 0 3px var(--brand-glow); }
+        .search-pill input { border: none; background: transparent; width: 100%; color: var(--text-main); font-family: inherit; }
+
+        .action-btn {
+            width: 40px; height: 40px; border-radius: 12px; border: 1px solid var(--glass-border);
+            background: var(--glass-surface); color: var(--text-main); cursor: pointer;
+            display: grid; place-items: center; transition: 0.2s;
+        }
+        .action-btn:hover { background: var(--brand-primary); color: white; border-color: transparent; }
+
+        .scroll-area { padding: 0 32px 40px 32px; overflow-y: auto; height: 100%; } 
+        .scroll-area::-webkit-scrollbar { width: 6px; }
+        .scroll-area::-webkit-scrollbar-thumb { background: var(--glass-border); border-radius: 99px; }
+
+        .dashboard-grid {
+            display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 20px; margin-bottom: 24px;
+        }
+
+        .stat-card {
+            padding: 24px; border-radius: var(--radius-xl);
+            display: flex; flex-direction: column; justify-content: space-between; height: 160px;
+        }
+        .stat-icon-box {
+            width: 44px; height: 44px; border-radius: 12px; display: grid; place-items: center; font-size: 20px;
+        }
+        .stat-val { font-size: 36px; font-weight: 800; font-family: 'JetBrains Mono', monospace; margin-top: 10px; }
+        
+        .data-table { width: 100%; border-collapse: separate; border-spacing: 0; margin-top: 20px; }
+        .data-table th {
+            text-align: start; padding: 16px; color: var(--text-muted); font-size: 11px;
+            text-transform: uppercase; letter-spacing: 1px; border-bottom: 1px solid var(--glass-border);
+        }
+        .data-table td { padding: 16px; border-bottom: 1px solid rgba(255,255,255,0.02); font-weight: 600; font-size: 14px; }
+        .badge { padding: 4px 10px; border-radius: 99px; font-size: 11px; font-weight: 800; }
+        .badge.success { background: rgba(16, 185, 129, 0.15); color: var(--tactical-green); border: 1px solid rgba(16, 185, 129, 0.2); }
+
+        /* Notification */
+        .toast-container { position: fixed; top: 24px; left: 50%; transform: translateX(-50%); z-index: 1000; }
+        /* Scan modal overlay & content */
+        .scan-modal {
+            position: fixed;
+            inset: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: rgba(0, 0, 0, 0.6);
+            z-index: 999;
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity 0.3s ease;
+        }
+        .scan-modal.show {
+            opacity: 1;
+            pointer-events: auto;
+        }
+        .scan-modal-content {
+            width: 90%;
+            max-width: 480px;
+            padding: 24px;
+            border-radius: var(--radius-xl);
+            background: var(--glass-surface);
+            backdrop-filter: blur(24px);
+            -webkit-backdrop-filter: blur(24px);
+            border: 1px solid var(--glass-border);
+            box-shadow: var(--glass-shadow);
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+        .scan-modal-content video {
+            width: 100%;
+            max-height: 260px;
+            border-radius: var(--radius-lg);
+            background: #000;
+        }
+        .scan-modal-content input[type="text"] {
+            flex: 1;
+        }
+        .toast {
+            background: var(--glass-surface); backdrop-filter: blur(20px);
+            border: 1px solid var(--glass-border); padding: 12px 20px; border-radius: 99px;
+            display: flex; align-items: center; gap: 12px; box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+            animation: slide-down 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+        }
+        @keyframes slide-down { from { transform: translateY(-20px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+
+        @media (max-width: 900px) {
+            .sidebar { display: none; }
+            .scroll-area { padding: 16px; padding-bottom: 160px; }
+            .topbar { padding: 10px; }
+            .search-pill { width: 100%; }
+
+            /* Keep SCAN always accessible in portrait mobile */
+            .mobile-scan-dock{
+                display:flex;
+                position: fixed;
+                left: 14px;
+                right: 14px;
+                bottom: calc(14px + env(safe-area-inset-bottom));
+                z-index: 90;
+            }
+        }
+
+        /* Extra small devices: stack layout and reduce padding for better mobile usability */
+        @media (max-width: 600px) {
+            .login-card { padding: 24px; }
+            .dashboard-grid { grid-template-columns: 1fr; }
+            .topbar { flex-direction: column; align-items: flex-start; height: auto; gap: 8px; padding: 12px; }
+            .search-pill { width: 100%; margin-top: 8px; }
+            .scanner-controls { flex-direction: column; align-items: stretch; gap: 8px; }
+            .scan-trigger-btn { width: 100%; }
+        }
+    </style>
+</head>
+<body>
+
+    <!-- Ambient Core -->
+    <div class="ambient-layer">
+        <div class="blob blob-1"></div>
+        <div class="blob blob-2"></div>
+        <div class="blob blob-3"></div>
+        <div class="grid-overlay"></div>
+        <div class="noise-overlay"></div>
+    </div>
+
+    <div id="app">
+
+        <!-- VIEW: LOGIN -->
+        <section id="view-login" class="view-section active">
+            <div class="login-wrapper">
+                <div class="login-card glass-panel">
+                    <div style="text-align: center;">
+                        <!-- Replace generic cube icon with the actual ATH logo image -->
+                        <div style="display:flex; justify-content:center; margin-bottom:20px;">
+                            <!-- Increase logo size on the login card for better visibility -->
+                            <!-- Increase the login logo further for better prominence on large screens -->
+                            <!-- Further enlarge the login logo for maximum visibility -->
+                            <img src="./assets/ath-medical-division.png" alt="ATH Medical Division" style="width:240px; height:240px; border-radius:20px; object-fit:contain; box-shadow:0 20px 50px var(--brand-glow);"/>
+                        </div>
+                        <h1 style="margin: 0; font-size: 26px; font-weight: 800;">ATH Portal <span style="color: var(--brand-primary)">Ultra</span></h1>
+                        <p style="color: var(--text-muted); margin: 8px 0 32px;">Advanced Warehouse Management</p>
+                    </div>
+
+                    <form id="loginForm">
+                        <input type="text" class="form-input" id="username" name="username" autocomplete="username" placeholder="Operator ID" value="">
+                        <input type="password" class="form-input" id="password" name="password" autocomplete="current-password" placeholder="Access Key" value="">
+                        <button type="submit" class="btn-primary" id="loginBtn" onmouseenter="sfx.hover()">
+                            <span>Initialize System</span>
+                            <i class="ph-bold ph-arrow-right"></i>
+                        </button>
+                        <div id="loginInlineError" style="display:none; margin-top:10px; font-size:12px; font-weight:700; color: var(--tactical-red);"></div>
+                    </form>
+                </div>
+            </div>
+        </section>
+
+        <!-- VIEW: DASHBOARD -->
+        <section id="view-dashboard" class="view-section">
+            <div class="dash-layout">
+                
+                <!-- Sidebar -->
+                <aside class="sidebar glass-panel">
+                    <div style="display: flex; align-items: center; gap: 12px; padding: 0 12px 20px;">
+                        <!-- Swap sidebar cube icon with the ATH logo image -->
+                        <!-- Enlarge sidebar logo so it is clearly visible -->
+                        <!-- Enlarge the sidebar logo so it is clearly visible on all devices -->
+                        <div style="width:96px; height:96px; border-radius:12px; overflow:hidden;">
+                            <!-- Further enlarge the sidebar logo for improved legibility -->
+                            <img src="./assets/ath-medical-division.png" alt="ATH" style="width:100%; height:100%; object-fit:contain;"/>
+                        </div>
+                        <div>
+                            <div style="font-weight: 800; font-size: 16px;">ATH Medical</div>
+                            <div style="font-size: 11px; color: var(--text-muted); font-weight: 700; letter-spacing: 1px;">RIYADH HUB</div>
+                        </div>
+                    </div>
+
+                    <!-- Main Nav -->
+                    <nav style="flex: 1; display: flex; flex-direction: column; gap: 6px; overflow-y: auto;">
+                        <div class="nav-item active" onmouseenter="sfx.hover()" onclick="sfx.click()">
+                            <i class="ph-bold ph-squares-four" style="font-size: 20px;"></i>
+                            <span>Overview</span>
+                        </div>
+                        <div class="nav-item" onmouseenter="sfx.hover()" onclick="sfx.click()">
+                            <i class="ph-bold ph-package" style="font-size: 20px;"></i>
+                            <span>Inventory</span>
+                        </div>
+                        <div class="nav-item" onmouseenter="sfx.hover()" onclick="sfx.click()">
+                            <i class="ph-bold ph-truck" style="font-size: 20px;"></i>
+                            <span>Shipments</span>
+                        </div>
+                        <div class="nav-item" onmouseenter="sfx.hover()" onclick="sfx.click()">
+                            <i class="ph-bold ph-users" style="font-size: 20px;"></i>
+                            <span>Staff</span>
+                        </div>
+                    </nav>
+
+                    <!-- SIDEBAR SCANNER WIDGET -->
+                    <div class="sidebar-scanner" id="globalScanner">
+                        <div class="scanner-viewport">
+                            <div class="camera-feed-sim"></div>
+                            <div class="laser-line"></div>
+                            <div class="scanner-overlay-ui"></div>
+                            <i class="ph-duotone ph-scan" style="font-size: 32px; opacity: 0.5; z-index: 1; color: white;"></i>
+                        </div>
+                        <div class="scanner-controls">
+                            <div style="flex: 1;">
+                                <div style="font-size: 10px; font-weight: 700; color: var(--text-muted); margin-bottom: 2px;">STATUS</div>
+                                <div id="scannerStatus" style="font-size: 12px; font-weight: 800; color: var(--brand-primary);">STANDBY</div>
+                            </div>
+                            <button class="scan-trigger-btn" onclick="window.triggerScan()" onmouseenter="sfx.hover()">
+                                <i class="ph-bold ph-aperture"></i> SCAN
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- User Profile Footer -->
+                    <div class="glass-panel" style="padding: 10px; border-radius: 12px; display: flex; align-items: center; gap: 10px;">
+                        <div style="width: 32px; height: 32px; background: linear-gradient(135deg, var(--text-main), var(--text-muted)); border-radius: 50%; color: var(--bg-deep); display: grid; place-items: center; font-weight: 800;">A</div>
+                        <div style="flex: 1; overflow: hidden;">
+                            <div style="font-weight: 700; font-size: 13px;">Admin</div>
+                            <div style="font-size: 10px; color: var(--text-muted);">Online</div>
+                        </div>
+                        <button onclick="logout()" onmouseenter="sfx.hover()" style="border: none; background: transparent; color: var(--tactical-red); cursor: pointer;"><i class="ph-bold ph-sign-out"></i></button>
+                    </div>
+                </aside>
+
+                <!-- Main Content -->
+                <main class="main-content">
+                    <header class="topbar">
+                        <div style="display: flex; flex-direction: column;">
+                            <div style="font-size: 12px; color: var(--text-muted); font-weight: 600;">Welcome back</div>
+                            <div style="font-size: 20px; font-weight: 800;">Dashboard</div>
+                        </div>
+
+                        <div style="display: flex; align-items: center; gap: 16px;">
+                            <div class="search-pill">
+                                <i class="ph-bold ph-magnifying-glass"></i>
+                                <input type="text" placeholder="Search GTIN, Batch, SKU...">
+                                <span>CTRL+K</span>
+                            </div>
+                            <button class="action-btn" onclick="toggleTheme()" onmouseenter="sfx.hover()" title="Theme">
+                                <i class="ph-bold ph-moon-stars"></i>
+                            </button>
+                        </div>
+                    </header>
+
+                    <div class="scroll-area">
+                        <div class="dashboard-grid">
+                            <div class="stat-card glass-panel glass-panel-hover" onmouseenter="sfx.hover()">
+                                <div style="display: flex; justify-content: space-between;">
+                                    <div class="stat-icon-box" style="background: rgba(59,130,246,0.15); color: var(--brand-primary);"><i class="ph-bold ph-barcode"></i></div>
+                                    <div style="font-size: 12px; color: var(--tactical-green); font-weight: 700;">+12% ▲</div>
+                                </div>
+                                <div>
+                                    <div class="stat-val">2,841</div>
+                                    <div style="font-size: 13px; font-weight: 700; color: var(--text-muted);">Daily Scans</div>
+                                </div>
+                            </div>
+                            <div class="stat-card glass-panel glass-panel-hover" onmouseenter="sfx.hover()">
+                                <div style="display: flex; justify-content: space-between;">
+                                    <div class="stat-icon-box" style="background: rgba(16,185,129,0.15); color: var(--tactical-green);"><i class="ph-bold ph-check-circle"></i></div>
+                                    <div style="font-size: 12px; color: var(--tactical-green); font-weight: 700;">99.9%</div>
+                                </div>
+                                <div>
+                                    <div class="stat-val">Verified</div>
+                                    <div style="font-size: 13px; font-weight: 700; color: var(--text-muted);">Success Rate</div>
+                                </div>
+                            </div>
+                            <div class="stat-card glass-panel glass-panel-hover" onmouseenter="sfx.hover()">
+                                <div style="display: flex; justify-content: space-between;">
+                                    <div class="stat-icon-box" style="background: rgba(245,158,11,0.15); color: var(--tactical-amber);"><i class="ph-bold ph-warning"></i></div>
+                                    <div style="font-size: 12px; color: var(--tactical-amber); font-weight: 700;">Action Req</div>
+                                </div>
+                                <div>
+                                    <div class="stat-val">14</div>
+                                    <div style="font-size: 13px; font-weight: 700; color: var(--text-muted);">Pending Issues</div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="glass-panel" style="padding: 24px; border-radius: var(--radius-xl);">
+                            <div style="display: flex; justify-content: space-between; margin-bottom: 20px;">
+                                <div style="font-size: 14px; font-weight: 700; color: var(--text-muted);">Live Throughput</div>
+                                <i class="ph-bold ph-faders"></i>
+                            </div>
+                            
+                            <div id="chart-container" style="display: flex; align-items: flex-end; gap: 12px; height: 120px; padding-bottom: 20px; border-bottom: 1px solid var(--glass-border);">
+                                <!-- Bars injected via JS -->
+                            </div>
+
+                            <table class="data-table">
+                                <thead>
+                                    <tr>
+                                        <th>UDI Ref</th>
+                                        <th>Product</th>
+                                        <th>Status</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <tr onmouseenter="sfx.hover()">
+                                        <td style="font-family: 'JetBrains Mono'">#992-AX</td>
+                                        <td>Surgical Kit Type A</td>
+                                        <td><span class="badge success">Verified</span></td>
+                                    </tr>
+                                    <tr onmouseenter="sfx.hover()">
+                                        <td style="font-family: 'JetBrains Mono'">#991-BV</td>
+                                        <td>Gloves Box (L)</td>
+                                        <td><span class="badge success">Verified</span></td>
+                                    </tr>
+                                    <tr onmouseenter="sfx.hover()">
+                                        <td style="font-family: 'JetBrains Mono'">#884-XY</td>
+                                        <td>IV Drip Set 20ml</td>
+                                        <td><span class="badge success">Verified</span></td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </main>
+
+                <!-- MOBILE SCAN DOCK (visible when sidebar is hidden on small screens) -->
+                <div class="mobile-scan-dock glass-panel" id="mobileScanDock" aria-label="Mobile scan dock">
+                    <div style="display:flex; flex-direction:column; gap:2px; min-width:0;">
+                        <div style="font-size:10px; font-weight:700; color: var(--text-muted); letter-spacing:.2px;">SCANNER</div>
+                        <div id="scannerStatusMobile" style="font-size:12px; font-weight:800; color: var(--brand-primary); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">STANDBY</div>
+                    </div>
+                    <button class="scan-trigger-btn scan-trigger-btn--mobile" onclick="window.triggerScan()" onmouseenter="sfx.hover()">
+                        <i class="ph-bold ph-aperture"></i> SCAN
+                    </button>
+                </div>
+            </div>
+        </section>
+
+    </div>
+
+    <!-- Notification Container -->
+    <div class="toast-container" id="toastArea"></div>
+
+    <!-- Scan modal: provides camera feed and manual input for scanning -->
+    <div id="scanModal" class="scan-modal">
+        <div class="scan-modal-content glass-panel">
+            <div style="display: flex; align-items: center; justify-content: space-between;">
+                <div style="font-weight: 700; font-size: 16px;">Scan UDI</div>
+                <button id="btnCloseScan" type="button" style="background: transparent; border: none; color: var(--text-main); font-size: 22px; cursor: pointer;"><i class="ph-bold ph-x"></i></button>
+            </div>
+            <video id="scanVideo" autoplay muted playsinline webkit-playsinline></video>
+            <div id="scanHint" style="font-size: 12px; color: var(--text-muted); font-weight: 600;">Camera capture</div>
+            <div style="display: flex; gap: 8px; margin-top: 12px;">
+                <input type="text" id="scanManual" class="form-input" placeholder="Enter UDI manually..." style="flex: 1;">
+                <button id="btnManualSubmit" type="button" class="btn-primary" style="padding: 12px 16px; display: flex; align-items: center; gap: 8px;">
+                    <span>Submit</span>
+                    <i class="ph-bold ph-arrow-right"></i>
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        /* === PRO AUDIO ENGINE (Formal Tones) === */
+        const sfx = {
+            ctx: null,
+            init: () => { if(!sfx.ctx) sfx.ctx = new (window.AudioContext || window.webkitAudioContext)(); },
+            play: (type) => {
+                if(!sfx.ctx) return;
+                const t = sfx.ctx.currentTime;
+                const osc = sfx.ctx.createOscillator();
+                const gain = sfx.ctx.createGain();
+                
+                const filter = sfx.ctx.createBiquadFilter();
+                filter.type = "lowpass"; filter.frequency.value = 1200;
+
+                osc.connect(filter); filter.connect(gain); gain.connect(sfx.ctx.destination);
+
+                if (type === 'hover') {
+                    osc.type = 'sine'; osc.frequency.setValueAtTime(600, t);
+                    gain.gain.setValueAtTime(0.02, t); gain.gain.exponentialRampToValueAtTime(0.001, t + 0.05);
+                    osc.start(t); osc.stop(t + 0.05);
+                } 
+                else if (type === 'click') {
+                    osc.type = 'triangle'; osc.frequency.setValueAtTime(120, t);
+                    gain.gain.setValueAtTime(0.05, t); gain.gain.exponentialRampToValueAtTime(0.001, t + 0.1);
+                    osc.start(t); osc.stop(t + 0.1);
+                }
+                else if (type === 'success') {
+                    const osc2 = sfx.ctx.createOscillator();
+                    osc.frequency.setValueAtTime(523.25, t); // C5
+                    osc2.frequency.setValueAtTime(659.25, t); // E5
+                    osc2.connect(gain);
+                    gain.gain.setValueAtTime(0.05, t); gain.gain.exponentialRampToValueAtTime(0.001, t + 0.6);
+                    osc.start(t); osc.stop(t + 0.6); osc2.start(t); osc2.stop(t + 0.6);
+                }
+                else if (type === 'scan_start') {
+                    osc.type = 'sine'; osc.frequency.setValueAtTime(200, t);
+                    osc.frequency.linearRampToValueAtTime(800, t + 0.3);
+                    gain.gain.setValueAtTime(0.05, t); gain.gain.linearRampToValueAtTime(0, t + 0.3);
+                    osc.start(t); osc.stop(t + 0.3);
+                }
+            },
+            hover: () => sfx.play('hover'),
+            click: () => sfx.play('click')
+        };
+
+        /* === APP LOGIC === */
+        const state = { theme: 'dark', lang: 'en', scanning: false };
+        const el = id => document.getElementById(id);
+
+        document.addEventListener('DOMContentLoaded', () => { renderChart(); });
+        document.addEventListener('click', () => sfx.init(), {once:true});
+
+        el('loginForm').addEventListener('submit', (e) => {
+            e.preventDefault();
+            sfx.click();
+            const btn = el('loginBtn');
+            btn.innerHTML = `<i class="ph-bold ph-spinner" style="animation: spin 1s infinite linear"></i> Authenticating...`;
+            setTimeout(() => {
+                el('view-login').classList.remove('active');
+                setTimeout(() => {
+                    el('view-dashboard').classList.add('active');
+                    sfx.play('success');
+                    showToast('Welcome Back', 'System Online.', 'success');
+                }, 400);
+            }, 1200);
+        });
+
+        function logout() {
+            sfx.click();
+            el('view-dashboard').classList.remove('active');
+            setTimeout(() => {
+                el('view-login').classList.add('active');
+                el('loginBtn').innerHTML = `<span>Initialize System</span><i class="ph-bold ph-arrow-right"></i>`;
+                el('loginForm').reset();
+            }, 400);
+        }
+
+        function toggleTheme() {
+            sfx.click();
+            const themes = ['dark', 'tactical', 'light'];
+            const nextIndex = (themes.indexOf(state.theme) + 1) % themes.length;
+            state.theme = themes[nextIndex];
+            document.documentElement.setAttribute('data-theme', state.theme);
+        }
+
+        // --- Camera helpers (request permission and stream feed) ---
+        let camStream = null;
+        async function startCamera() {
+            const videoEl = document.getElementById('scanVideo');
+            const hintEl = document.getElementById('scanHint');
+            if (!videoEl) return;
+
+            // iOS Safari: keep the camera feed inline + allow autoplay
+            try {
+                videoEl.setAttribute('playsinline', 'true');
+                videoEl.setAttribute('webkit-playsinline', 'true');
+                videoEl.playsInline = true;
+                videoEl.muted = true;
+                videoEl.autoplay = true;
+            } catch {}
+            if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+                if (hintEl) hintEl.innerText = 'Camera API not supported.';
+                return;
+            }
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' } }, audio: false });
+                camStream = stream;
+                videoEl.srcObject = stream;
+                await videoEl.play();
+                if (hintEl) hintEl.innerText = 'Camera ready';
+            } catch (err) {
+                if (hintEl) hintEl.innerText = 'Camera blocked. Use manual input.';
+                // Inform user via toast and sound
+                showToast('Camera error', err.message || 'CAMERA_BLOCKED', 'warn');
+            }
+        }
+
+        function stopCamera() {
+            if (camStream) {
+                try { camStream.getTracks().forEach((t) => t.stop()); } catch {}
+                camStream = null;
+            }
+            const v = document.getElementById('scanVideo');
+            if (v) {
+                try { v.pause(); } catch {}
+                v.srcObject = null;
+            }
+        }
+
+        /**
+         * Continuously detect barcodes using the native BarcodeDetector API. When a code is found
+         * it is displayed via the toast mechanism and scanning stops. If no code is detected
+         * within the timeout period the scan is aborted with a warning. This function assumes
+         * the camera has already been started via startCamera().
+         */
+        async function startBarcodeScan() {
+            const videoEl = document.getElementById('scanVideo');
+            const hintEl = document.getElementById('scanHint');
+            if (!videoEl) return;
+            // Prefer native BarcodeDetector if available
+            const hasBD = (typeof window.BarcodeDetector === 'function');
+            if (!hasBD) {
+                // Fall back to ZXing if supported
+                await startZXingScan();
+                return;
+            }
+            try {
+                const formats = ['qr_code','code_128','code_39','ean_13','ean_8','upc_a','upc_e','itf','data_matrix','pdf417','aztec'];
+                const detector = new window.BarcodeDetector({ formats });
+                const startTime = Date.now();
+                const timeoutMs = 25000;
+                const tick = async () => {
+                    if (!videoEl || videoEl.readyState < 2) {
+                        requestAnimationFrame(tick);
+                        return;
+                    }
+                    try {
+                        const codes = await detector.detect(videoEl);
+                        if (codes && codes.length) {
+                            const raw = codes[0].rawValue || codes[0].data || '';
+                            try { sfx.play('success'); } catch {}
+                            showToast('Scan Result', raw, 'success');
+                            finishScan();
+                            return;
+                        }
+                    } catch (err) {
+                        // Ignore transient errors during detection
+                    }
+                    if (Date.now() - startTime > timeoutMs) {
+                        // Timeout
+                        try { sfx.play('click'); } catch {}
+                        showToast('Scan Timeout', 'No code detected', 'warn');
+                        finishScan();
+                        return;
+                    }
+                    requestAnimationFrame(tick);
+                };
+                tick();
+            } catch (e) {
+                if (hintEl) hintEl.innerText = 'Barcode detection failed.';
+            }
+        }
+
+        /**
+         * Load the ZXing library from a CDN if not already loaded. Returns a promise
+         * that resolves once ZXing is available on window.ZXing or window.ZXingBrowser.
+         */
+        function ensureZXing() {
+            return new Promise((resolve, reject) => {
+                if (window.ZXingBrowser || window.ZXing) { resolve(); return; }
+                const script = document.createElement('script');
+                // Use jsDelivr to load a stable UMD build of the ZXing library. Adjust version as needed.
+                script.src = 'https://cdn.jsdelivr.net/npm/@zxing/library@0.20.0/umd/index.min.js';
+                script.onload = () => resolve();
+                script.onerror = () => reject(new Error('Failed to load ZXing')); 
+                document.head.appendChild(script);
+            });
+        }
+
+        /**
+         * Start scanning using ZXing. Loads the library on demand and then decodes
+         * from the current video stream. Similar timeout handling as the native
+         * BarcodeDetector flow.
+         */
+        async function startZXingScan() {
+            const videoEl = document.getElementById('scanVideo');
+            const hintEl = document.getElementById('scanHint');
+            if (!videoEl) return;
+            try {
+                await ensureZXing();
+                const Z = window.ZXingBrowser || window.ZXing;
+                if (!Z) throw new Error('ZXing not available');
+                // Prefer BrowserMultiFormatReader if present
+                const ReaderCtor = Z.BrowserMultiFormatReader || Z.BrowserMultiFormatContinuousReader || Z.BrowserQRCodeReader;
+                if (!ReaderCtor) throw new Error('Unsupported ZXing bundle');
+                const reader = new ReaderCtor();
+                const startTime = Date.now();
+                const timeoutMs = 30000;
+                // Start decoding from the existing camera stream
+                const controls = await reader.decodeFromVideoDevice(null, videoEl, (result) => {
+                    if (result) {
+                        const txt = typeof result.getText === 'function' ? result.getText() : (result.text || result.rawValue || String(result));
+                        try { sfx.play('success'); } catch {}
+                        showToast('Scan Result', txt, 'success');
+                        // stop decoding and camera
+                        controls?.stop?.();
+                        finishScan();
+                    }
+                });
+                // Set up timeout fallback
+                const timer = setInterval(() => {
+                    if (Date.now() - startTime > timeoutMs) {
+                        clearInterval(timer);
+                        try { sfx.play('click'); } catch {}
+                        showToast('Scan Timeout', 'No code detected', 'warn');
+                        controls?.stop?.();
+                        finishScan();
+                    }
+                }, 500);
+            } catch (err) {
+                if (hintEl) hintEl.innerText = 'ZXing failed: ' + (err.message || err);
+            }
+        }
+
+        /**
+         * Common cleanup when a scan ends, either via success, timeout or stop. Resets UI and camera.
+         */
+        function finishScan() {
+            const scanner = document.getElementById('globalScanner');
+            const mobileDock = document.getElementById('mobileScanDock');
+            const statuses = [
+                document.getElementById('scannerStatus'),
+                document.getElementById('scannerStatusMobile')
+            ].filter(Boolean);
+            const btns = document.querySelectorAll('.scan-trigger-btn');
+            state.scanning = false;
+            if (scanner) scanner.classList.remove('active');
+            if (mobileDock) mobileDock.classList.remove('active');
+            statuses.forEach((status) => {
+                status.innerText = 'STANDBY';
+                status.style.color = 'var(--brand-primary)';
+            });
+            btns.forEach((btn) => {
+                btn.innerHTML = `<i class="ph-bold ph-aperture"></i> SCAN`;
+            });
+            document.getElementById('scanModal')?.classList.remove('show');
+            stopCamera();
+        }
+
+        function triggerScan() {
+            const scanner = el('globalScanner');
+            const mobileDock = el('mobileScanDock');
+            const statuses = [el('scannerStatus'), el('scannerStatusMobile')].filter(Boolean);
+            const btns = document.querySelectorAll('.scan-trigger-btn');
+
+            // Toggle scanning state
+            state.scanning = !state.scanning;
+
+            if (state.scanning) {
+                // Start scan UI
+                sfx.play('scan_start');
+                scanner?.classList.add('active');
+                mobileDock?.classList.add('active');
+                statuses.forEach((status) => {
+                    status.innerText = 'ACTIVE CAPTURE';
+                    status.style.color = 'var(--tactical-red)';
+                });
+                btns.forEach((btn) => {
+                    btn.innerHTML = `<i class="ph-bold ph-spinner" style="animation: spin 1s infinite linear"></i> STOP`;
+                });
+
+                // Show scan modal and start camera, then begin barcode detection
+                const modal = document.getElementById('scanModal');
+                if (modal) modal.classList.add('show');
+                // Start the camera stream
+                startCamera().then(() => {
+                    // Begin the detection loop once the camera is ready
+                    startBarcodeScan();
+                });
+            } else {
+                // Stop scan UI
+                sfx.click();
+                scanner?.classList.remove('active');
+                mobileDock?.classList.remove('active');
+                statuses.forEach((status) => {
+                    status.innerText = 'STANDBY';
+                    status.style.color = 'var(--brand-primary)';
+                });
+                btns.forEach((btn) => {
+                    btn.innerHTML = `<i class="ph-bold ph-aperture"></i> SCAN`;
+                });
+
+                // Hide modal and stop camera
+                const modal = document.getElementById('scanModal');
+                if (modal) modal.classList.remove('show');
+                stopCamera();
+            }
+        }
+
+        // Preserve our scan handler before wow-bindings.js overrides it
+        window.__ATH_CUSTOM_TRIGGER_SCAN__ = triggerScan;
+
+        function renderChart() {
+            const container = el('chart-container');
+            container.innerHTML = '';
+            const data = [30, 45, 60, 40, 70, 55, 80, 65, 90, 75, 100, 85];
+            data.forEach((val, i) => {
+                const bar = document.createElement('div');
+                bar.style.cssText = `flex: 1; background: var(--glass-border); border-radius: 6px; height: 0%; transition: height 1s cubic-bezier(0.34, 1.56, 0.64, 1); cursor: pointer;`;
+                bar.onmouseenter = () => { sfx.hover(); bar.style.background = 'var(--brand-primary)'; };
+                bar.onmouseleave = () => bar.style.background = 'var(--glass-border)';
+                container.appendChild(bar);
+                setTimeout(() => bar.style.height = val + '%', i * 50);
+            });
+        }
+
+        function showToast(title, msg, type) {
+            const toast = document.createElement('div');
+            toast.className = 'toast';
+            toast.innerHTML = `
+                <i class="ph-fill ph-check-circle" style="font-size: 20px; color: var(--tactical-green)"></i>
+                <div><div style="font-weight: 700; font-size: 14px;">${title}</div><div style="font-size: 12px; color: var(--text-muted);">${msg}</div></div>
+            `;
+            el('toastArea').appendChild(toast);
+            setTimeout(() => { toast.style.opacity = '0'; setTimeout(() => toast.remove(), 300); }, 4000);
+        }
+
+        // Attach handlers for scan modal controls after DOM is loaded
+        document.addEventListener('DOMContentLoaded', () => {
+            const closeBtn = document.getElementById('btnCloseScan');
+            if (closeBtn) closeBtn.addEventListener('click', () => {
+                // If a scan is running, toggle it (will hide modal and stop camera)
+                if (state.scanning) window.triggerScan();
+                else {
+                    document.getElementById('scanModal')?.classList.remove('show');
+                    stopCamera();
+                }
+            });
+            const manualBtn = document.getElementById('btnManualSubmit');
+            if (manualBtn) manualBtn.addEventListener('click', () => {
+                const raw = (document.getElementById('scanManual')?.value || '').trim();
+                if (!raw) return;
+                try { sfx.play('success'); } catch {}
+                showToast('Manual Scan', raw, 'success');
+                // Clear input
+                document.getElementById('scanManual').value = '';
+                // Stop scanning if running
+                if (state.scanning) window.triggerScan();
+            });
+        });
+    </script>
+
+    <script src="/wow-bindings.js"></script>
+    <!-- Ensure our custom scan implementation is used instead of WOW's default. 
+         After wow-bindings.js loads and overrides window.triggerScan, reassign it
+         back to our custom triggerScan function defined above.  -->
+    <script>
+        // Defer reassignment until bindings have executed
+        window.addEventListener('DOMContentLoaded', function() {
+            // Force the scan button to use ATH scan modal implementation.
+            if (typeof window.__ATH_CUSTOM_TRIGGER_SCAN__ === 'function') {
+                window.triggerScan = window.__ATH_CUSTOM_TRIGGER_SCAN__;
+            }
+        });
+    </script>
+</body>
+</html>
